@@ -1,5 +1,6 @@
 """DM_Labs utilities for diffusion language model experiments."""
 
+from .data_utils import TokenBlockDataset, collate_blocks, format_as_chat
 from .eval_utils import (
     mask_ratio_cosine_schedule,
     mask_ratio_linear_schedule,
@@ -12,8 +13,14 @@ from .eval_utils import (
     load_diffusion_checkpoint,
 )
 from .hf_utils import ensure_hf_model_card, upload_checkpoint_to_hub
+from .modeling import DiffusionLMConfig, DiffusionTransformerLM
 
 __all__ = [
+    "TokenBlockDataset",
+    "collate_blocks",
+    "format_as_chat",
+    "DiffusionLMConfig",
+    "DiffusionTransformerLM",
     "mask_ratio_cosine_schedule",
     "mask_ratio_linear_schedule",
     "corrupt_with_mask",

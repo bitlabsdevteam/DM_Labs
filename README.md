@@ -12,6 +12,10 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
     - diffusion pseudo-perplexity evaluation
     - linear-vs-cosine comparison
     - FairSteer-style evaluation artifact export
+- `dm_labs/modeling.py`
+  - extracted diffusion Transformer model/config code from the notebook
+- `dm_labs/data_utils.py`
+  - extracted token-block dataset + collation utilities
 - `dm_labs/eval_utils.py`
   - reusable diffusion evaluation helpers
   - token-weighted pseudo-perplexity computation
