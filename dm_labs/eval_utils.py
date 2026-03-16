@@ -28,6 +28,32 @@ def _safe_exp(value: float) -> float:
     return math.exp(min(80.0, value))
 
 
+def _timestep_fraction_from_int(timestep: int, T: int) -> float:
+    if T <= 0:
+        raise ValueError(f"T must be positive, got {T}")
+    return float(max(1, min(T, int(timestep)))) / float(T)
+
+
+def _resolve_eval_timesteps(timestep_plan: Dict[str, object], T: int, device: torch.device) -> Tuple[Tensor, Tensor, Tensor]:
+    if "u" in timestep_plan and timestep_plan["u"] is not None:
+        u = timestep_plan["u"]
+        if not isinstance(u, torch.Tensor):
+            u = torch.tensor(u, dtype=torch.float32)
+        u = u.to(device=device, dtype=torch.float32)
+        eval_t = torch.clamp(torch.round(u * float(T)), min=1, max=T).long()
+        return eval_t, u, eval_t.detach().cpu()
+
+    if "t" not in timestep_plan or timestep_plan["t"] is None:
+        raise ValueError("Each timestep_plan must provide either 'u' (normalized timestep fractions) or 't' (integer timesteps).")
+
+    eval_t = timestep_plan["t"]
+    if not isinstance(eval_t, torch.Tensor):
+        eval_t = torch.tensor(eval_t, dtype=torch.long)
+    eval_t = eval_t.to(device=device, dtype=torch.long)
+    u = (eval_t.float() / float(T)).detach().cpu()
+    return eval_t, u.to(device=device), eval_t.detach().cpu()
+
+
 def _bootstrap_metric_interval(
     batch_records: Sequence[Dict[str, float]],
     *,
@@ -251,8 +277,8 @@ def _bootstrap_paired_comparison_interval(
     if cosine_grid_batch_metrics is not None and linear_grid_batch_metrics is not None and len(cosine_grid_batch_metrics) != len(linear_grid_batch_metrics):
         raise ValueError("Paired bootstrap requires the same number of cosine and linear grid batch records.")
     if cosine_timestep_metrics is not None and linear_timestep_metrics is not None:
-        cosine_timestep_by_step = {int(row["timestep"]): row for row in cosine_timestep_metrics}
-        linear_timestep_by_step = {int(row["timestep"]): row for row in linear_timestep_metrics}
+        cosine_timestep_by_step = {int(row.get("source_plan_timestep", row["timestep"])): row for row in cosine_timestep_metrics}
+        linear_timestep_by_step = {int(row.get("source_plan_timestep", row["timestep"])): row for row in linear_timestep_metrics}
         shared_timestep_keys = sorted(set(cosine_timestep_by_step) & set(linear_timestep_by_step))
         if len(shared_timestep_keys) != len(cosine_timestep_by_step) or len(shared_timestep_keys) != len(linear_timestep_by_step):
             raise ValueError("Paired timestep-macro bootstrap requires the same shared timestep grid for cosine and linear metrics.")
@@ -394,7 +420,7 @@ def _bootstrap_paired_comparison_interval(
     def _with_win_probability(metric_name: str, values: Sequence[float]) -> Dict[str, float]:
         if not values:
             return {**_metric_percentiles(values), "probability_linear_better": float("nan")}
-        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy", "grid_uniform_masked_token_accuracy"}
+        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy", "grid_uniform_masked_token_accuracy", "timestep_macro_masked_token_accuracy"}
         wins = sum(v > 0.0 for v in values) if higher_is_better else sum(v < 0.0 for v in values)
         return {**_metric_percentiles(values), "probability_linear_better": float(wins / len(values))}
 
@@ -514,13 +540,22 @@ def build_eval_plan(
         attention_mask = batch["attention_mask"].detach().cpu()
         B, L = input_ids.shape
         sampled_t = torch.randint(1, T + 1, (B,), generator=generator)
+        sampled_u = sampled_t.float() / float(T)
 
-        timestep_plans = [{"kind": "sampled", "t": sampled_t, "rand": torch.rand((B, L), generator=generator)}]
+        timestep_plans = [
+            {
+                "kind": "sampled",
+                "t": sampled_t,
+                "u": sampled_u,
+                "rand": torch.rand((B, L), generator=generator),
+            }
+        ]
         for t in resolved_grid:
             timestep_plans.append(
                 {
                     "kind": "grid",
                     "t": torch.full((B,), int(t), dtype=torch.long),
+                    "u": torch.full((B,), float(t) / float(T), dtype=torch.float32),
                     "rand": torch.rand((B, L), generator=generator),
                 }
             )
@@ -616,7 +651,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         batch_active_tokens = int(batch_plan.get("active_tokens", int(attention_mask.sum().item())))
 
         for timestep_plan in batch_plan["timestep_plans"]:
-            eval_t = timestep_plan["t"].to(device)
+            eval_t, timestep_fraction, source_timestep = _resolve_eval_timesteps(timestep_plan, T, device)
             rand = timestep_plan["rand"].to(device)
             noisy_ids, labels, mask_positions = corruption_fn(
                 input_ids=input_ids,
@@ -645,6 +680,8 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
 
                 batch_ce = token_nll_sum / masked_count
                 t_values = eval_t.detach().cpu().tolist()
+                u_values = timestep_fraction.detach().cpu().tolist()
+                source_t_values = source_timestep.tolist()
                 for value in t_values:
                     value = int(value)
                     sampled_timestep_histogram[value] = sampled_timestep_histogram.get(value, 0) + 1
@@ -660,6 +697,8 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                         "masked_token_accuracy": correct / masked_count,
                         "mean_mask_fraction": masked_count / max(1, batch_active_tokens),
                         "sampled_timesteps": t_values,
+                        "sampled_timestep_fractions": [float(v) for v in u_values],
+                        "source_plan_timesteps": [int(v) for v in source_t_values],
                     }
                 )
 
@@ -680,6 +719,8 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                             "batch_index": batch_idx,
                             "example_index": example_idx,
                             "timestep": int(eval_t[example_idx].item()),
+                            "source_plan_timestep": int(source_timestep[example_idx].item()),
+                            "timestep_fraction": float(timestep_fraction[example_idx].item()),
                             "nll_sum": example_nll_sum,
                             "masked_tokens": example_masked_tokens,
                             "correct_masked_tokens": example_correct,
@@ -690,7 +731,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                         }
                     )
             else:
-                key = int(eval_t[0].item())
+                key = int(source_timestep[0].item())
                 batch_ce = token_nll_sum / masked_count
                 batch_accuracy = correct / masked_count
                 rec = timestep_records.setdefault(
@@ -701,6 +742,9 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                         "mask_ratio_sum": 0.0,
                         "examples": 0,
                         "correct": 0,
+                        "timestep": int(eval_t[0].item()),
+                        "source_plan_timestep": key,
+                        "timestep_fraction": float(timestep_fraction[0].item()),
                     },
                 )
                 rec["nll_sum"] += token_nll_sum
@@ -711,7 +755,9 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 grid_batch_metrics.append(
                     {
                         "batch_index": batch_idx,
-                        "timestep": key,
+                        "timestep": int(eval_t[0].item()),
+                        "source_plan_timestep": key,
+                        "timestep_fraction": float(timestep_fraction[0].item()),
                         "nll_sum": token_nll_sum,
                         "masked_tokens": masked_count,
                         "correct_masked_tokens": correct,
@@ -739,7 +785,9 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             ce = rec["nll_sum"] / rec["masked_tokens"]
             timestep_metrics.append(
                 {
-                    "timestep": t,
+                    "timestep": int(rec.get("timestep", t)),
+                    "source_plan_timestep": int(rec.get("source_plan_timestep", t)),
+                    "timestep_fraction": float(rec.get("timestep_fraction", _timestep_fraction_from_int(t, T))),
                     "avg_cross_entropy": ce,
                     "pseudo_perplexity": _safe_exp(ce),
                     "bits_per_masked_token": ce / math.log(2.0),
@@ -808,9 +856,12 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         "T": T,
         "schedule_name": schedule_name,
         "timestep_grid": list(eval_plan.get("timestep_grid", [])),
+        "timestep_grid_fractions": [_timestep_fraction_from_int(t, int(eval_plan.get("T", T))) for t in list(eval_plan.get("timestep_grid", []))],
+        "eval_plan_T": int(eval_plan.get("T", T)),
+        "normalized_timestep_remapping": bool(int(eval_plan.get("T", T)) != int(T)),
         "paired_noise": True,
         "paired_batches": True,
-        "sampled_timestep_distribution": "uniform_integer_1_to_T",
+        "sampled_timestep_distribution": "uniform_integer_1_to_eval_plan_T_then_remapped_by_fraction_per_model",
         "grid_uniform_aggregation": "mean_over_cached_batch_timestep_records",
         "timestep_macro_aggregation": "mean_over_token_weighted_per_timestep_metrics_on_cached_grid",
         "bootstrap_samples": bootstrap_samples,
@@ -924,7 +975,11 @@ def compare_schedule_checkpoints(
             "n_batches": n_batches,
             "seed": seed,
             "shared_timestep_grid": shared_timestep_grid,
+            "shared_timestep_grid_fractions": [_timestep_fraction_from_int(t, shared_T) for t in shared_timestep_grid],
             "shared_eval_plan_T": shared_T,
+            "cosine_diffusion_steps": int(cosine_cfg.diffusion_steps),
+            "linear_diffusion_steps": int(linear_cfg.diffusion_steps) if linear_cfg is not None else None,
+            "normalized_timestep_remapping": bool(linear_cfg is not None and int(cosine_cfg.diffusion_steps) != int(linear_cfg.diffusion_steps)),
             "excluded_token_ids": _normalize_excluded_token_ids(excluded_token_ids),
             "paired_batches": True,
             "paired_uniform_noise": True,
@@ -932,6 +987,7 @@ def compare_schedule_checkpoints(
             "notes": [
                 "Both checkpoints are evaluated on the same cached batches.",
                 "Both schedules reuse the same underlying uniform random matrices, so differences come from the schedule mapping and the model, not fresh mask draws.",
+                "If diffusion_steps differ, shared eval-plan timesteps are remapped by normalized timestep fraction before each model is evaluated.",
                 "The comparison reports both sampled-timestep and fixed-grid-uniform aggregates.",
             ],
         },
@@ -939,8 +995,8 @@ def compare_schedule_checkpoints(
     }
 
     if len(models) == 2:
-        cosine_metrics = {row["timestep"]: row for row in models[0].get("timestep_metrics", [])}
-        linear_metrics = {row["timestep"]: row for row in models[1].get("timestep_metrics", [])}
+        cosine_metrics = {int(row.get("source_plan_timestep", row["timestep"])): row for row in models[0].get("timestep_metrics", [])}
+        linear_metrics = {int(row.get("source_plan_timestep", row["timestep"])): row for row in models[1].get("timestep_metrics", [])}
         shared_timesteps = sorted(set(cosine_metrics) & set(linear_metrics))
         comparison["delta"] = {
             "pseudo_perplexity": models[1]["pseudo_perplexity"] - models[0]["pseudo_perplexity"],
@@ -972,7 +1028,10 @@ def compare_schedule_checkpoints(
         }
         comparison["timestep_deltas"] = [
             {
-                "timestep": t,
+                "source_plan_timestep": t,
+                "timestep_fraction": cosine_metrics[t].get("timestep_fraction", linear_metrics[t].get("timestep_fraction")),
+                "cosine_timestep": cosine_metrics[t]["timestep"],
+                "linear_timestep": linear_metrics[t]["timestep"],
                 "pseudo_perplexity": linear_metrics[t]["pseudo_perplexity"] - cosine_metrics[t]["pseudo_perplexity"],
                 "avg_cross_entropy": linear_metrics[t]["avg_cross_entropy"] - cosine_metrics[t]["avg_cross_entropy"],
                 "bits_per_masked_token": linear_metrics[t]["bits_per_masked_token"] - cosine_metrics[t]["bits_per_masked_token"],

@@ -65,11 +65,13 @@ Current protocol improvements in the repo:
 - expose **bootstrap confidence intervals** over sampled evaluation batches
 - expose **timestep-conditioned diagnostics** so schedule quality can be inspected across early/mid/late denoising
 - compare cosine vs linear checkpoints under a **shared cached batch set, shared timestep grid, and shared underlying uniform noise draws**
+- when checkpoints use different `diffusion_steps`, remap the shared plan by **normalized timestep fraction** so comparisons stay corruption-matched instead of integer-step-mismatched
 - export **per-timestep linear-minus-cosine deltas**, including mask-fraction deltas, for tighter schedule analysis
 - attach **paired bootstrap delta intervals** so schedule winners are reported with uncertainty, not just point estimates
 - attach **paired timestep-macro bootstrap intervals** so equal-weight-over-timestep schedule claims are uncertainty-aware too
 - expose a **fixed-grid shared-timestep aggregate** plus paired uncertainty so cosine-vs-linear claims can be checked on an explicit common denoising surface
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts
+- surface when normalized timestep remapping was used in cross-checkpoint comparisons and Hugging Face artifacts
 
 ## Current Notebook Capabilities
 
