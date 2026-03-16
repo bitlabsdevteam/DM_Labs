@@ -232,6 +232,8 @@ def _bootstrap_paired_comparison_interval(
     linear_example_metrics: Optional[Sequence[Dict[str, float]]] = None,
     cosine_grid_batch_metrics: Optional[Sequence[Dict[str, float]]] = None,
     linear_grid_batch_metrics: Optional[Sequence[Dict[str, float]]] = None,
+    cosine_timestep_metrics: Optional[Sequence[Dict[str, float]]] = None,
+    linear_timestep_metrics: Optional[Sequence[Dict[str, float]]] = None,
     n_samples: int = 500,
     seed: int = 0,
 ) -> Dict[str, object]:
@@ -248,6 +250,16 @@ def _bootstrap_paired_comparison_interval(
         raise ValueError("Paired bootstrap requires the same number of cosine and linear example records.")
     if cosine_grid_batch_metrics is not None and linear_grid_batch_metrics is not None and len(cosine_grid_batch_metrics) != len(linear_grid_batch_metrics):
         raise ValueError("Paired bootstrap requires the same number of cosine and linear grid batch records.")
+    if cosine_timestep_metrics is not None and linear_timestep_metrics is not None:
+        cosine_timestep_by_step = {int(row["timestep"]): row for row in cosine_timestep_metrics}
+        linear_timestep_by_step = {int(row["timestep"]): row for row in linear_timestep_metrics}
+        shared_timestep_keys = sorted(set(cosine_timestep_by_step) & set(linear_timestep_by_step))
+        if len(shared_timestep_keys) != len(cosine_timestep_by_step) or len(shared_timestep_keys) != len(linear_timestep_by_step):
+            raise ValueError("Paired timestep-macro bootstrap requires the same shared timestep grid for cosine and linear metrics.")
+    else:
+        cosine_timestep_by_step = {}
+        linear_timestep_by_step = {}
+        shared_timestep_keys = []
 
     rng = torch.Generator(device="cpu")
     rng.manual_seed(seed)
@@ -269,6 +281,12 @@ def _bootstrap_paired_comparison_interval(
         "grid_uniform_pseudo_perplexity": [],
         "grid_uniform_bits_per_masked_token": [],
         "grid_uniform_masked_token_accuracy": [],
+    }
+    timestep_macro_delta_samples = {
+        "timestep_macro_avg_cross_entropy": [],
+        "timestep_macro_pseudo_perplexity": [],
+        "timestep_macro_bits_per_masked_token": [],
+        "timestep_macro_masked_token_accuracy": [],
     }
 
     for _ in range(n_samples):
@@ -348,6 +366,31 @@ def _bootstrap_paired_comparison_interval(
                         (sum(linear_grid_acc) / len(linear_grid_acc)) - (sum(cosine_grid_acc) / len(cosine_grid_acc))
                     )
 
+        if shared_timestep_keys:
+            n_timesteps = len(shared_timestep_keys)
+            timestep_indices = torch.randint(0, n_timesteps, (n_timesteps,), generator=rng)
+            cosine_macro_ce = []
+            linear_macro_ce = []
+            cosine_macro_acc = []
+            linear_macro_acc = []
+            for idx in timestep_indices.tolist():
+                timestep = shared_timestep_keys[idx]
+                cosine_rec = cosine_timestep_by_step[timestep]
+                linear_rec = linear_timestep_by_step[timestep]
+                cosine_macro_ce.append(float(cosine_rec["avg_cross_entropy"]))
+                linear_macro_ce.append(float(linear_rec["avg_cross_entropy"]))
+                cosine_macro_acc.append(float(cosine_rec["masked_token_accuracy"]))
+                linear_macro_acc.append(float(linear_rec["masked_token_accuracy"]))
+            if cosine_macro_ce and linear_macro_ce:
+                cosine_uniform_ce = sum(cosine_macro_ce) / len(cosine_macro_ce)
+                linear_uniform_ce = sum(linear_macro_ce) / len(linear_macro_ce)
+                timestep_macro_delta_samples["timestep_macro_avg_cross_entropy"].append(linear_uniform_ce - cosine_uniform_ce)
+                timestep_macro_delta_samples["timestep_macro_pseudo_perplexity"].append(_safe_exp(linear_uniform_ce) - _safe_exp(cosine_uniform_ce))
+                timestep_macro_delta_samples["timestep_macro_bits_per_masked_token"].append((linear_uniform_ce - cosine_uniform_ce) / math.log(2.0))
+                timestep_macro_delta_samples["timestep_macro_masked_token_accuracy"].append(
+                    (sum(linear_macro_acc) / len(linear_macro_acc)) - (sum(cosine_macro_acc) / len(cosine_macro_acc))
+                )
+
     def _with_win_probability(metric_name: str, values: Sequence[float]) -> Dict[str, float]:
         if not values:
             return {**_metric_percentiles(values), "probability_linear_better": float("nan")}
@@ -358,6 +401,7 @@ def _bootstrap_paired_comparison_interval(
     summary = {key: _with_win_probability(key, values) for key, values in batch_delta_samples.items()}
     summary.update({key: _with_win_probability(key, values) for key, values in example_delta_samples.items()})
     summary.update({key: _with_win_probability(key, values) for key, values in grid_delta_samples.items()})
+    summary.update({key: _with_win_probability(key, values) for key, values in timestep_macro_delta_samples.items()})
     return {
         "method": "paired_bootstrap_over_shared_eval_plan",
         "n_pairs": n_batches,
@@ -946,6 +990,8 @@ def compare_schedule_checkpoints(
             linear_example_metrics=models[1].get("sampled_example_metrics", []),
             cosine_grid_batch_metrics=models[0].get("grid_batch_metrics", []),
             linear_grid_batch_metrics=models[1].get("grid_batch_metrics", []),
+            cosine_timestep_metrics=models[0].get("timestep_metrics", []),
+            linear_timestep_metrics=models[1].get("timestep_metrics", []),
             n_samples=bootstrap_samples,
             seed=seed,
         )

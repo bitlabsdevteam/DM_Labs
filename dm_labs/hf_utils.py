@@ -88,8 +88,10 @@ def ensure_hf_model_card(
         ppx_ci = delta_ci.get("pseudo_perplexity") or {}
         uniform_ppx_ci = delta_ci.get("timestep_uniform_pseudo_perplexity") or {}
         grid_ppx_ci = delta_ci.get("grid_uniform_pseudo_perplexity") or {}
+        macro_ppx_ci = delta_ci.get("timestep_macro_pseudo_perplexity") or {}
         acc_ci = delta_ci.get("masked_token_accuracy") or {}
         grid_acc_ci = delta_ci.get("grid_uniform_masked_token_accuracy") or {}
+        macro_acc_ci = delta_ci.get("timestep_macro_masked_token_accuracy") or {}
         comparison_block = (
             "\n## Schedule comparison\n\n"
             "| metric_view | delta_linear_minus_cosine | winner | extra |\n"
@@ -97,10 +99,10 @@ def ensure_hf_model_card(
             f"| sampled_pseudo_perplexity | {delta.get('pseudo_perplexity')} | {winner.get('pseudo_perplexity')} | bootstrap_p05_p95=[{ppx_ci.get('p05')}, {ppx_ci.get('p95')}], p_linear_better={ppx_ci.get('probability_linear_better')} |\n"
             f"| timestep_uniform_pseudo_perplexity | {delta.get('timestep_uniform_pseudo_perplexity')} | {winner.get('timestep_uniform_pseudo_perplexity')} | bootstrap_p05_p95=[{uniform_ppx_ci.get('p05')}, {uniform_ppx_ci.get('p95')}], p_linear_better={uniform_ppx_ci.get('probability_linear_better')} |\n"
             f"| grid_uniform_pseudo_perplexity | {delta.get('grid_uniform_pseudo_perplexity')} | {winner.get('grid_uniform_pseudo_perplexity')} | bootstrap_p05_p95=[{grid_ppx_ci.get('p05')}, {grid_ppx_ci.get('p95')}], p_linear_better={grid_ppx_ci.get('probability_linear_better')} |\n"
-            f"| timestep_macro_pseudo_perplexity | {delta.get('timestep_macro_pseudo_perplexity')} | {winner.get('timestep_macro_pseudo_perplexity')} | equal weight per diagnostic timestep |\n"
+            f"| timestep_macro_pseudo_perplexity | {delta.get('timestep_macro_pseudo_perplexity')} | {winner.get('timestep_macro_pseudo_perplexity')} | bootstrap_p05_p95=[{macro_ppx_ci.get('p05')}, {macro_ppx_ci.get('p95')}], p_linear_better={macro_ppx_ci.get('probability_linear_better')} |\n"
             f"| sampled_accuracy | {delta.get('masked_token_accuracy')} | {winner.get('masked_token_accuracy')} | bootstrap_p05_p95=[{acc_ci.get('p05')}, {acc_ci.get('p95')}], p_linear_better={acc_ci.get('probability_linear_better')} |\n"
             f"| grid_uniform_accuracy | {delta.get('grid_uniform_masked_token_accuracy')} | {winner.get('grid_uniform_masked_token_accuracy')} | bootstrap_p05_p95=[{grid_acc_ci.get('p05')}, {grid_acc_ci.get('p95')}], p_linear_better={grid_acc_ci.get('probability_linear_better')} |\n"
-            f"| timestep_macro_accuracy | {delta.get('timestep_macro_masked_token_accuracy')} | {winner.get('timestep_macro_masked_token_accuracy')} | equal weight per diagnostic timestep |\n\n"
+            f"| timestep_macro_accuracy | {delta.get('timestep_macro_masked_token_accuracy')} | {winner.get('timestep_macro_masked_token_accuracy')} | bootstrap_p05_p95=[{macro_acc_ci.get('p05')}, {macro_acc_ci.get('p95')}], p_linear_better={macro_acc_ci.get('probability_linear_better')} |\n\n"
             f"- avg_cross_entropy_delta_linear_minus_cosine: {delta.get('avg_cross_entropy')}\n"
             f"- timestep_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_uniform_avg_cross_entropy')}\n"
             f"- grid_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('grid_uniform_avg_cross_entropy')}\n"
