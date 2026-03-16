@@ -76,6 +76,10 @@ def ensure_hf_model_card(
     if comparison_summary and len(comparison_summary.get("models", [])) >= 2:
         delta = comparison_summary.get("delta") or {}
         winner = comparison_summary.get("winner") or {}
+        delta_ci = ((comparison_summary.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {})
+        ppx_ci = delta_ci.get("pseudo_perplexity") or {}
+        uniform_ppx_ci = delta_ci.get("timestep_uniform_pseudo_perplexity") or {}
+        acc_ci = delta_ci.get("masked_token_accuracy") or {}
         comparison_block = (
             "\n## Schedule comparison\n\n"
             f"- pseudo_perplexity_delta_linear_minus_cosine: {delta.get('pseudo_perplexity')}\n"
@@ -83,6 +87,12 @@ def ensure_hf_model_card(
             f"- timestep_uniform_pseudo_perplexity_delta_linear_minus_cosine: {delta.get('timestep_uniform_pseudo_perplexity')}\n"
             f"- timestep_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_uniform_avg_cross_entropy')}\n"
             f"- masked_token_accuracy_delta_linear_minus_cosine: {delta.get('masked_token_accuracy')}\n"
+            f"- pseudo_perplexity_delta_bootstrap_p05_p95: [{ppx_ci.get('p05')}, {ppx_ci.get('p95')}]\n"
+            f"- timestep_uniform_pseudo_perplexity_delta_bootstrap_p05_p95: [{uniform_ppx_ci.get('p05')}, {uniform_ppx_ci.get('p95')}]\n"
+            f"- masked_token_accuracy_delta_bootstrap_p05_p95: [{acc_ci.get('p05')}, {acc_ci.get('p95')}]\n"
+            f"- probability_linear_better_by_pseudo_perplexity: {ppx_ci.get('probability_linear_better')}\n"
+            f"- probability_linear_better_by_timestep_uniform_pseudo_perplexity: {uniform_ppx_ci.get('probability_linear_better')}\n"
+            f"- probability_linear_better_by_accuracy: {acc_ci.get('probability_linear_better')}\n"
             f"- winner_by_pseudo_perplexity: {winner.get('pseudo_perplexity')}\n"
             f"- winner_by_timestep_uniform_pseudo_perplexity: {winner.get('timestep_uniform_pseudo_perplexity')}\n"
             f"- winner_by_accuracy: {winner.get('masked_token_accuracy')}\n"

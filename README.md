@@ -23,6 +23,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - masked-token accuracy + timestep-slice denoising diagnostics
   - cached shared-batch/shared-noise evaluation plans for reproducible comparisons
   - paired cosine-vs-linear checkpoint comparison using the same underlying corruption draws
+  - paired bootstrap confidence intervals for linear-vs-cosine metric deltas on the shared eval plan
   - per-timestep delta reporting for linear-vs-cosine comparisons
 - `dm_labs/hf_utils.py`
   - reusable Hugging Face model-card + upload helpers
@@ -58,6 +59,7 @@ Current protocol improvements in the repo:
 - expose **timestep-conditioned diagnostics** so schedule quality can be inspected across early/mid/late denoising
 - compare cosine vs linear checkpoints under a **shared cached batch set, shared timestep grid, and shared underlying uniform noise draws**
 - export **per-timestep linear-minus-cosine deltas**, including mask-fraction deltas, for tighter schedule analysis
+- attach **paired bootstrap delta intervals** so schedule winners are reported with uncertainty, not just point estimates
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts
 
 ## Current Notebook Capabilities

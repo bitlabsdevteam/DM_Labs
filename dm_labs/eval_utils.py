@@ -101,6 +101,127 @@ def _bootstrap_metric_interval(
     }
 
 
+def _metric_percentiles(samples: Sequence[float]) -> Dict[str, float]:
+    if not samples:
+        return {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")}
+    xs = torch.tensor(list(samples), dtype=torch.float64)
+    q = torch.quantile(xs, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    return {
+        "mean": float(xs.mean().item()),
+        "p05": float(q[0]),
+        "p50": float(q[1]),
+        "p95": float(q[2]),
+    }
+
+
+def _bootstrap_paired_comparison_interval(
+    cosine_batch_metrics: Sequence[Dict[str, float]],
+    linear_batch_metrics: Sequence[Dict[str, float]],
+    *,
+    cosine_example_metrics: Optional[Sequence[Dict[str, float]]] = None,
+    linear_example_metrics: Optional[Sequence[Dict[str, float]]] = None,
+    n_samples: int = 500,
+    seed: int = 0,
+) -> Dict[str, object]:
+    if not cosine_batch_metrics or not linear_batch_metrics:
+        return {
+            "method": "paired_bootstrap_over_shared_eval_plan",
+            "n_pairs": 0,
+            "replicates": 0,
+            "delta_linear_minus_cosine": {},
+        }
+    if len(cosine_batch_metrics) != len(linear_batch_metrics):
+        raise ValueError("Paired bootstrap requires the same number of cosine and linear batch records.")
+    if cosine_example_metrics is not None and linear_example_metrics is not None and len(cosine_example_metrics) != len(linear_example_metrics):
+        raise ValueError("Paired bootstrap requires the same number of cosine and linear example records.")
+
+    rng = torch.Generator(device="cpu")
+    rng.manual_seed(seed)
+    n_batches = len(cosine_batch_metrics)
+    batch_delta_samples = {
+        "avg_cross_entropy": [],
+        "pseudo_perplexity": [],
+        "bits_per_masked_token": [],
+        "masked_token_accuracy": [],
+    }
+    example_delta_samples = {
+        "timestep_uniform_avg_cross_entropy": [],
+        "timestep_uniform_pseudo_perplexity": [],
+        "timestep_uniform_bits_per_masked_token": [],
+        "timestep_uniform_masked_token_accuracy": [],
+    }
+
+    for _ in range(n_samples):
+        batch_indices = torch.randint(0, n_batches, (n_batches,), generator=rng)
+        cosine_nll = 0.0
+        linear_nll = 0.0
+        cosine_masked = 0
+        linear_masked = 0
+        cosine_correct = 0
+        linear_correct = 0
+
+        for idx in batch_indices.tolist():
+            cosine_rec = cosine_batch_metrics[idx]
+            linear_rec = linear_batch_metrics[idx]
+            cosine_nll += float(cosine_rec["nll_sum"])
+            linear_nll += float(linear_rec["nll_sum"])
+            cosine_masked += int(cosine_rec["masked_tokens"])
+            linear_masked += int(linear_rec["masked_tokens"])
+            cosine_correct += int(cosine_rec.get("correct_masked_tokens", 0))
+            linear_correct += int(linear_rec.get("correct_masked_tokens", 0))
+
+        if cosine_masked > 0 and linear_masked > 0:
+            cosine_ce = cosine_nll / cosine_masked
+            linear_ce = linear_nll / linear_masked
+            batch_delta_samples["avg_cross_entropy"].append(linear_ce - cosine_ce)
+            batch_delta_samples["pseudo_perplexity"].append(_safe_exp(linear_ce) - _safe_exp(cosine_ce))
+            batch_delta_samples["bits_per_masked_token"].append((linear_ce - cosine_ce) / math.log(2.0))
+            batch_delta_samples["masked_token_accuracy"].append((linear_correct / linear_masked) - (cosine_correct / cosine_masked))
+
+        if cosine_example_metrics is None or linear_example_metrics is None:
+            continue
+        n_examples = len(cosine_example_metrics)
+        if n_examples == 0:
+            continue
+        example_indices = torch.randint(0, n_examples, (n_examples,), generator=rng)
+        cosine_example_ce = []
+        linear_example_ce = []
+        cosine_example_acc = []
+        linear_example_acc = []
+        for idx in example_indices.tolist():
+            cosine_rec = cosine_example_metrics[idx]
+            linear_rec = linear_example_metrics[idx]
+            cosine_example_ce.append(float(cosine_rec["avg_cross_entropy"]))
+            linear_example_ce.append(float(linear_rec["avg_cross_entropy"]))
+            cosine_example_acc.append(float(cosine_rec["masked_token_accuracy"]))
+            linear_example_acc.append(float(linear_rec["masked_token_accuracy"]))
+        if cosine_example_ce and linear_example_ce:
+            cosine_uniform_ce = sum(cosine_example_ce) / len(cosine_example_ce)
+            linear_uniform_ce = sum(linear_example_ce) / len(linear_example_ce)
+            example_delta_samples["timestep_uniform_avg_cross_entropy"].append(linear_uniform_ce - cosine_uniform_ce)
+            example_delta_samples["timestep_uniform_pseudo_perplexity"].append(_safe_exp(linear_uniform_ce) - _safe_exp(cosine_uniform_ce))
+            example_delta_samples["timestep_uniform_bits_per_masked_token"].append((linear_uniform_ce - cosine_uniform_ce) / math.log(2.0))
+            example_delta_samples["timestep_uniform_masked_token_accuracy"].append(
+                (sum(linear_example_acc) / len(linear_example_acc)) - (sum(cosine_example_acc) / len(cosine_example_acc))
+            )
+
+    def _with_win_probability(metric_name: str, values: Sequence[float]) -> Dict[str, float]:
+        if not values:
+            return {**_metric_percentiles(values), "probability_linear_better": float("nan")}
+        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy"}
+        wins = sum(v > 0.0 for v in values) if higher_is_better else sum(v < 0.0 for v in values)
+        return {**_metric_percentiles(values), "probability_linear_better": float(wins / len(values))}
+
+    summary = {key: _with_win_probability(key, values) for key, values in batch_delta_samples.items()}
+    summary.update({key: _with_win_probability(key, values) for key, values in example_delta_samples.items()})
+    return {
+        "method": "paired_bootstrap_over_shared_eval_plan",
+        "n_pairs": n_batches,
+        "replicates": n_samples,
+        "delta_linear_minus_cosine": summary,
+    }
+
+
 def mask_ratio_cosine_schedule(t: Tensor, T: int, offset: float = 0.008, exponent: float = 2.0) -> Tensor:
     normalized_t = t.float() / float(T)
     v_start = math.cos(offset / (1.0 + offset) * math.pi / 2.0) ** exponent
@@ -331,6 +452,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                         "batch_index": batch_idx,
                         "nll_sum": token_nll_sum,
                         "masked_tokens": masked_count,
+                        "correct_masked_tokens": correct,
                         "avg_cross_entropy": batch_ce,
                         "pseudo_perplexity": _safe_exp(batch_ce),
                         "bits_per_masked_token": batch_ce / math.log(2.0),
@@ -359,6 +481,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                             "timestep": int(eval_t[example_idx].item()),
                             "nll_sum": example_nll_sum,
                             "masked_tokens": example_masked_tokens,
+                            "correct_masked_tokens": example_correct,
                             "avg_cross_entropy": example_ce,
                             "pseudo_perplexity": _safe_exp(example_ce),
                             "bits_per_masked_token": example_ce / math.log(2.0),
@@ -605,6 +728,14 @@ def compare_schedule_checkpoints(
             }
             for t in shared_timesteps
         ]
+        comparison["delta_confidence_intervals"] = _bootstrap_paired_comparison_interval(
+            cosine_batch_metrics=models[0].get("sampled_batch_metrics", []),
+            linear_batch_metrics=models[1].get("sampled_batch_metrics", []),
+            cosine_example_metrics=models[0].get("sampled_example_metrics", []),
+            linear_example_metrics=models[1].get("sampled_example_metrics", []),
+            n_samples=bootstrap_samples,
+            seed=seed,
+        )
     return comparison
 
 
