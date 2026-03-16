@@ -14,7 +14,7 @@ from .eval_utils import (
     mask_ratio_cosine_schedule,
     mask_ratio_linear_schedule,
 )
-from .hf_utils import ensure_hf_model_card, upload_checkpoint_to_hub, write_eval_summary
+from .hf_utils import ensure_hf_model_card, upload_checkpoint_to_hub, write_eval_summary, write_schedule_comparison
 from .modeling import DiffusionLMConfig, DiffusionTransformerLM
 
 __all__ = [
@@ -36,5 +36,6 @@ __all__ = [
     "load_diffusion_checkpoint",
     "ensure_hf_model_card",
     "write_eval_summary",
+    "write_schedule_comparison",
     "upload_checkpoint_to_hub",
 ]
