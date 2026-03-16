@@ -19,7 +19,10 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
 - `dm_labs/eval_utils.py`
   - reusable diffusion evaluation helpers
   - token-weighted pseudo-perplexity computation
+  - timestep-uniform denoising CE / pseudo-perplexity
+  - fixed-grid-uniform denoising CE / pseudo-perplexity over cached diagnostic timesteps
   - bootstrap confidence intervals over sampled eval batches
+  - bootstrap confidence intervals over cached batch-timestep grid records
   - masked-token accuracy + timestep-slice denoising diagnostics
   - cached shared-batch/shared-noise evaluation plans for reproducible comparisons
   - paired cosine-vs-linear checkpoint comparison using the same underlying corruption draws
@@ -53,6 +56,7 @@ So this repo uses a **diffusion pseudo-perplexity** / denoising-based evaluation
 Current protocol improvements in the repo:
 - aggregate masked-token NLL by **token count**, not by naive per-batch averaging
 - also report a **timestep-uniform denoising CE / pseudo-perplexity** that averages per-example masked-token CE over uniformly sampled timesteps
+- also report a **grid-uniform denoising CE / pseudo-perplexity** that averages over a fixed cached timestep grid shared across schedule comparisons
 - report **bits per masked token** alongside pseudo-perplexity
 - report **masked-token accuracy** as a complementary denoising quality signal
 - expose **bootstrap confidence intervals** over sampled evaluation batches
@@ -60,6 +64,7 @@ Current protocol improvements in the repo:
 - compare cosine vs linear checkpoints under a **shared cached batch set, shared timestep grid, and shared underlying uniform noise draws**
 - export **per-timestep linear-minus-cosine deltas**, including mask-fraction deltas, for tighter schedule analysis
 - attach **paired bootstrap delta intervals** so schedule winners are reported with uncertainty, not just point estimates
+- expose a **fixed-grid shared-timestep aggregate** plus paired uncertainty so cosine-vs-linear claims can be checked on an explicit common denoising surface
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts
 
 ## Current Notebook Capabilities

@@ -50,6 +50,10 @@ def ensure_hf_model_card(
             f"- timestep_uniform_avg_cross_entropy: {eval_summary.get('timestep_uniform_avg_cross_entropy')}\n"
             f"- timestep_uniform_pseudo_perplexity: {eval_summary.get('timestep_uniform_pseudo_perplexity')}\n"
             f"- timestep_uniform_bits_per_masked_token: {eval_summary.get('timestep_uniform_bits_per_masked_token')}\n"
+            f"- grid_uniform_avg_cross_entropy: {eval_summary.get('grid_uniform_avg_cross_entropy')}\n"
+            f"- grid_uniform_pseudo_perplexity: {eval_summary.get('grid_uniform_pseudo_perplexity')}\n"
+            f"- grid_uniform_bits_per_masked_token: {eval_summary.get('grid_uniform_bits_per_masked_token')}\n"
+            f"- grid_uniform_masked_token_accuracy: {eval_summary.get('grid_uniform_masked_token_accuracy')}\n"
             f"- sampled_example_count: {eval_summary.get('sampled_example_count')}\n"
             f"- masked_tokens: {eval_summary.get('masked_tokens')}\n"
             f"- n_batches: {eval_summary.get('n_batches')}\n"
@@ -59,6 +63,12 @@ def ensure_hf_model_card(
         if ppx_ci:
             metrics_block += (
                 f"- pseudo_perplexity_bootstrap_p05_p95: [{ppx_ci.get('p05')}, {ppx_ci.get('p95')}]\n"
+            )
+        grid_ci = eval_summary.get("grid_uniform_confidence_intervals") or {}
+        grid_ppx_ci = grid_ci.get("grid_uniform_pseudo_perplexity") or {}
+        if grid_ppx_ci:
+            metrics_block += (
+                f"- grid_uniform_pseudo_perplexity_bootstrap_p05_p95: [{grid_ppx_ci.get('p05')}, {grid_ppx_ci.get('p95')}]\n"
             )
         protocol = eval_summary.get("eval_protocol") or {}
         if protocol:
@@ -79,23 +89,34 @@ def ensure_hf_model_card(
         delta_ci = ((comparison_summary.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {})
         ppx_ci = delta_ci.get("pseudo_perplexity") or {}
         uniform_ppx_ci = delta_ci.get("timestep_uniform_pseudo_perplexity") or {}
+        grid_ppx_ci = delta_ci.get("grid_uniform_pseudo_perplexity") or {}
         acc_ci = delta_ci.get("masked_token_accuracy") or {}
+        grid_acc_ci = delta_ci.get("grid_uniform_masked_token_accuracy") or {}
         comparison_block = (
             "\n## Schedule comparison\n\n"
             f"- pseudo_perplexity_delta_linear_minus_cosine: {delta.get('pseudo_perplexity')}\n"
             f"- avg_cross_entropy_delta_linear_minus_cosine: {delta.get('avg_cross_entropy')}\n"
             f"- timestep_uniform_pseudo_perplexity_delta_linear_minus_cosine: {delta.get('timestep_uniform_pseudo_perplexity')}\n"
             f"- timestep_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_uniform_avg_cross_entropy')}\n"
+            f"- grid_uniform_pseudo_perplexity_delta_linear_minus_cosine: {delta.get('grid_uniform_pseudo_perplexity')}\n"
+            f"- grid_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('grid_uniform_avg_cross_entropy')}\n"
             f"- masked_token_accuracy_delta_linear_minus_cosine: {delta.get('masked_token_accuracy')}\n"
+            f"- grid_uniform_masked_token_accuracy_delta_linear_minus_cosine: {delta.get('grid_uniform_masked_token_accuracy')}\n"
             f"- pseudo_perplexity_delta_bootstrap_p05_p95: [{ppx_ci.get('p05')}, {ppx_ci.get('p95')}]\n"
             f"- timestep_uniform_pseudo_perplexity_delta_bootstrap_p05_p95: [{uniform_ppx_ci.get('p05')}, {uniform_ppx_ci.get('p95')}]\n"
+            f"- grid_uniform_pseudo_perplexity_delta_bootstrap_p05_p95: [{grid_ppx_ci.get('p05')}, {grid_ppx_ci.get('p95')}]\n"
             f"- masked_token_accuracy_delta_bootstrap_p05_p95: [{acc_ci.get('p05')}, {acc_ci.get('p95')}]\n"
+            f"- grid_uniform_masked_token_accuracy_delta_bootstrap_p05_p95: [{grid_acc_ci.get('p05')}, {grid_acc_ci.get('p95')}]\n"
             f"- probability_linear_better_by_pseudo_perplexity: {ppx_ci.get('probability_linear_better')}\n"
             f"- probability_linear_better_by_timestep_uniform_pseudo_perplexity: {uniform_ppx_ci.get('probability_linear_better')}\n"
+            f"- probability_linear_better_by_grid_uniform_pseudo_perplexity: {grid_ppx_ci.get('probability_linear_better')}\n"
             f"- probability_linear_better_by_accuracy: {acc_ci.get('probability_linear_better')}\n"
+            f"- probability_linear_better_by_grid_uniform_accuracy: {grid_acc_ci.get('probability_linear_better')}\n"
             f"- winner_by_pseudo_perplexity: {winner.get('pseudo_perplexity')}\n"
             f"- winner_by_timestep_uniform_pseudo_perplexity: {winner.get('timestep_uniform_pseudo_perplexity')}\n"
+            f"- winner_by_grid_uniform_pseudo_perplexity: {winner.get('grid_uniform_pseudo_perplexity')}\n"
             f"- winner_by_accuracy: {winner.get('masked_token_accuracy')}\n"
+            f"- winner_by_grid_uniform_accuracy: {winner.get('grid_uniform_masked_token_accuracy')}\n"
         )
 
     readme_path.write_text(

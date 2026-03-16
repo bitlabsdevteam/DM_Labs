@@ -101,6 +101,93 @@ def _bootstrap_metric_interval(
     }
 
 
+def _bootstrap_grid_uniform_metric_interval(
+    grid_batch_records: Sequence[Dict[str, float]],
+    *,
+    n_samples: int = 500,
+    seed: int = 0,
+) -> Dict[str, object]:
+    if not grid_batch_records:
+        return {
+            "method": "bootstrap_over_grid_batch_timestep_records",
+            "n_records": 0,
+            "replicates": 0,
+            "grid_uniform_avg_cross_entropy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "grid_uniform_pseudo_perplexity": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "grid_uniform_bits_per_masked_token": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "grid_uniform_masked_token_accuracy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+        }
+
+    rng = torch.Generator(device="cpu")
+    rng.manual_seed(seed)
+    n = len(grid_batch_records)
+    ce_samples: List[float] = []
+    acc_samples: List[float] = []
+
+    for _ in range(n_samples):
+        indices = torch.randint(0, n, (n,), generator=rng)
+        ce_values: List[float] = []
+        acc_values: List[float] = []
+        for idx in indices.tolist():
+            rec = grid_batch_records[idx]
+            ce_values.append(float(rec["avg_cross_entropy"]))
+            acc_values.append(float(rec["masked_token_accuracy"]))
+        if not ce_values:
+            continue
+        ce_samples.append(sum(ce_values) / len(ce_values))
+        acc_samples.append(sum(acc_values) / len(acc_values))
+
+    if not ce_samples:
+        return {
+            "method": "bootstrap_over_grid_batch_timestep_records",
+            "n_records": n,
+            "replicates": 0,
+            "grid_uniform_avg_cross_entropy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "grid_uniform_pseudo_perplexity": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "grid_uniform_bits_per_masked_token": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "grid_uniform_masked_token_accuracy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+        }
+
+    ce_tensor = torch.tensor(ce_samples, dtype=torch.float64)
+    ce_q = torch.quantile(ce_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    ppx_tensor = torch.tensor([_safe_exp(float(v)) for v in ce_samples], dtype=torch.float64)
+    ppx_q = torch.quantile(ppx_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    bits_tensor = torch.tensor([float(v) / math.log(2.0) for v in ce_samples], dtype=torch.float64)
+    bits_q = torch.quantile(bits_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    acc_tensor = torch.tensor(acc_samples, dtype=torch.float64)
+    acc_q = torch.quantile(acc_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+
+    return {
+        "method": "bootstrap_over_grid_batch_timestep_records",
+        "n_records": n,
+        "replicates": len(ce_samples),
+        "grid_uniform_avg_cross_entropy": {
+            "mean": float(ce_tensor.mean().item()),
+            "p05": float(ce_q[0]),
+            "p50": float(ce_q[1]),
+            "p95": float(ce_q[2]),
+        },
+        "grid_uniform_pseudo_perplexity": {
+            "mean": float(ppx_tensor.mean().item()),
+            "p05": float(ppx_q[0]),
+            "p50": float(ppx_q[1]),
+            "p95": float(ppx_q[2]),
+        },
+        "grid_uniform_bits_per_masked_token": {
+            "mean": float(bits_tensor.mean().item()),
+            "p05": float(bits_q[0]),
+            "p50": float(bits_q[1]),
+            "p95": float(bits_q[2]),
+        },
+        "grid_uniform_masked_token_accuracy": {
+            "mean": float(acc_tensor.mean().item()),
+            "p05": float(acc_q[0]),
+            "p50": float(acc_q[1]),
+            "p95": float(acc_q[2]),
+        },
+    }
+
+
 def _metric_percentiles(samples: Sequence[float]) -> Dict[str, float]:
     if not samples:
         return {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")}
@@ -120,6 +207,8 @@ def _bootstrap_paired_comparison_interval(
     *,
     cosine_example_metrics: Optional[Sequence[Dict[str, float]]] = None,
     linear_example_metrics: Optional[Sequence[Dict[str, float]]] = None,
+    cosine_grid_batch_metrics: Optional[Sequence[Dict[str, float]]] = None,
+    linear_grid_batch_metrics: Optional[Sequence[Dict[str, float]]] = None,
     n_samples: int = 500,
     seed: int = 0,
 ) -> Dict[str, object]:
@@ -134,6 +223,8 @@ def _bootstrap_paired_comparison_interval(
         raise ValueError("Paired bootstrap requires the same number of cosine and linear batch records.")
     if cosine_example_metrics is not None and linear_example_metrics is not None and len(cosine_example_metrics) != len(linear_example_metrics):
         raise ValueError("Paired bootstrap requires the same number of cosine and linear example records.")
+    if cosine_grid_batch_metrics is not None and linear_grid_batch_metrics is not None and len(cosine_grid_batch_metrics) != len(linear_grid_batch_metrics):
+        raise ValueError("Paired bootstrap requires the same number of cosine and linear grid batch records.")
 
     rng = torch.Generator(device="cpu")
     rng.manual_seed(seed)
@@ -149,6 +240,12 @@ def _bootstrap_paired_comparison_interval(
         "timestep_uniform_pseudo_perplexity": [],
         "timestep_uniform_bits_per_masked_token": [],
         "timestep_uniform_masked_token_accuracy": [],
+    }
+    grid_delta_samples = {
+        "grid_uniform_avg_cross_entropy": [],
+        "grid_uniform_pseudo_perplexity": [],
+        "grid_uniform_bits_per_masked_token": [],
+        "grid_uniform_masked_token_accuracy": [],
     }
 
     for _ in range(n_samples):
@@ -178,42 +275,66 @@ def _bootstrap_paired_comparison_interval(
             batch_delta_samples["bits_per_masked_token"].append((linear_ce - cosine_ce) / math.log(2.0))
             batch_delta_samples["masked_token_accuracy"].append((linear_correct / linear_masked) - (cosine_correct / cosine_masked))
 
-        if cosine_example_metrics is None or linear_example_metrics is None:
-            continue
-        n_examples = len(cosine_example_metrics)
-        if n_examples == 0:
-            continue
-        example_indices = torch.randint(0, n_examples, (n_examples,), generator=rng)
-        cosine_example_ce = []
-        linear_example_ce = []
-        cosine_example_acc = []
-        linear_example_acc = []
-        for idx in example_indices.tolist():
-            cosine_rec = cosine_example_metrics[idx]
-            linear_rec = linear_example_metrics[idx]
-            cosine_example_ce.append(float(cosine_rec["avg_cross_entropy"]))
-            linear_example_ce.append(float(linear_rec["avg_cross_entropy"]))
-            cosine_example_acc.append(float(cosine_rec["masked_token_accuracy"]))
-            linear_example_acc.append(float(linear_rec["masked_token_accuracy"]))
-        if cosine_example_ce and linear_example_ce:
-            cosine_uniform_ce = sum(cosine_example_ce) / len(cosine_example_ce)
-            linear_uniform_ce = sum(linear_example_ce) / len(linear_example_ce)
-            example_delta_samples["timestep_uniform_avg_cross_entropy"].append(linear_uniform_ce - cosine_uniform_ce)
-            example_delta_samples["timestep_uniform_pseudo_perplexity"].append(_safe_exp(linear_uniform_ce) - _safe_exp(cosine_uniform_ce))
-            example_delta_samples["timestep_uniform_bits_per_masked_token"].append((linear_uniform_ce - cosine_uniform_ce) / math.log(2.0))
-            example_delta_samples["timestep_uniform_masked_token_accuracy"].append(
-                (sum(linear_example_acc) / len(linear_example_acc)) - (sum(cosine_example_acc) / len(cosine_example_acc))
-            )
+        if cosine_example_metrics is not None and linear_example_metrics is not None:
+            n_examples = len(cosine_example_metrics)
+            if n_examples > 0:
+                example_indices = torch.randint(0, n_examples, (n_examples,), generator=rng)
+                cosine_example_ce = []
+                linear_example_ce = []
+                cosine_example_acc = []
+                linear_example_acc = []
+                for idx in example_indices.tolist():
+                    cosine_rec = cosine_example_metrics[idx]
+                    linear_rec = linear_example_metrics[idx]
+                    cosine_example_ce.append(float(cosine_rec["avg_cross_entropy"]))
+                    linear_example_ce.append(float(linear_rec["avg_cross_entropy"]))
+                    cosine_example_acc.append(float(cosine_rec["masked_token_accuracy"]))
+                    linear_example_acc.append(float(linear_rec["masked_token_accuracy"]))
+                if cosine_example_ce and linear_example_ce:
+                    cosine_uniform_ce = sum(cosine_example_ce) / len(cosine_example_ce)
+                    linear_uniform_ce = sum(linear_example_ce) / len(linear_example_ce)
+                    example_delta_samples["timestep_uniform_avg_cross_entropy"].append(linear_uniform_ce - cosine_uniform_ce)
+                    example_delta_samples["timestep_uniform_pseudo_perplexity"].append(_safe_exp(linear_uniform_ce) - _safe_exp(cosine_uniform_ce))
+                    example_delta_samples["timestep_uniform_bits_per_masked_token"].append((linear_uniform_ce - cosine_uniform_ce) / math.log(2.0))
+                    example_delta_samples["timestep_uniform_masked_token_accuracy"].append(
+                        (sum(linear_example_acc) / len(linear_example_acc)) - (sum(cosine_example_acc) / len(cosine_example_acc))
+                    )
+
+        if cosine_grid_batch_metrics is not None and linear_grid_batch_metrics is not None:
+            n_grid_records = len(cosine_grid_batch_metrics)
+            if n_grid_records > 0:
+                grid_indices = torch.randint(0, n_grid_records, (n_grid_records,), generator=rng)
+                cosine_grid_ce = []
+                linear_grid_ce = []
+                cosine_grid_acc = []
+                linear_grid_acc = []
+                for idx in grid_indices.tolist():
+                    cosine_rec = cosine_grid_batch_metrics[idx]
+                    linear_rec = linear_grid_batch_metrics[idx]
+                    cosine_grid_ce.append(float(cosine_rec["avg_cross_entropy"]))
+                    linear_grid_ce.append(float(linear_rec["avg_cross_entropy"]))
+                    cosine_grid_acc.append(float(cosine_rec["masked_token_accuracy"]))
+                    linear_grid_acc.append(float(linear_rec["masked_token_accuracy"]))
+                if cosine_grid_ce and linear_grid_ce:
+                    cosine_uniform_ce = sum(cosine_grid_ce) / len(cosine_grid_ce)
+                    linear_uniform_ce = sum(linear_grid_ce) / len(linear_grid_ce)
+                    grid_delta_samples["grid_uniform_avg_cross_entropy"].append(linear_uniform_ce - cosine_uniform_ce)
+                    grid_delta_samples["grid_uniform_pseudo_perplexity"].append(_safe_exp(linear_uniform_ce) - _safe_exp(cosine_uniform_ce))
+                    grid_delta_samples["grid_uniform_bits_per_masked_token"].append((linear_uniform_ce - cosine_uniform_ce) / math.log(2.0))
+                    grid_delta_samples["grid_uniform_masked_token_accuracy"].append(
+                        (sum(linear_grid_acc) / len(linear_grid_acc)) - (sum(cosine_grid_acc) / len(cosine_grid_acc))
+                    )
 
     def _with_win_probability(metric_name: str, values: Sequence[float]) -> Dict[str, float]:
         if not values:
             return {**_metric_percentiles(values), "probability_linear_better": float("nan")}
-        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy"}
+        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy", "grid_uniform_masked_token_accuracy"}
         wins = sum(v > 0.0 for v in values) if higher_is_better else sum(v < 0.0 for v in values)
         return {**_metric_percentiles(values), "probability_linear_better": float(wins / len(values))}
 
     summary = {key: _with_win_probability(key, values) for key, values in batch_delta_samples.items()}
     summary.update({key: _with_win_probability(key, values) for key, values in example_delta_samples.items()})
+    summary.update({key: _with_win_probability(key, values) for key, values in grid_delta_samples.items()})
     return {
         "method": "paired_bootstrap_over_shared_eval_plan",
         "n_pairs": n_batches,
@@ -367,6 +488,10 @@ def _empty_eval_result(n_batches: int, seed: int, excluded_token_ids: Optional[S
         "timestep_uniform_avg_cross_entropy": float("nan"),
         "timestep_uniform_pseudo_perplexity": float("nan"),
         "timestep_uniform_bits_per_masked_token": float("nan"),
+        "grid_uniform_avg_cross_entropy": float("nan"),
+        "grid_uniform_pseudo_perplexity": float("nan"),
+        "grid_uniform_bits_per_masked_token": float("nan"),
+        "grid_uniform_masked_token_accuracy": float("nan"),
         "sampled_example_count": 0,
         "masked_tokens": 0,
         "n_batches": n_batches,
@@ -374,13 +499,16 @@ def _empty_eval_result(n_batches: int, seed: int, excluded_token_ids: Optional[S
         "timestep_metrics": [],
         "sampled_batch_metrics": [],
         "sampled_example_metrics": [],
+        "grid_batch_metrics": [],
         "sampled_timestep_histogram": {},
         "excluded_token_ids": _normalize_excluded_token_ids(excluded_token_ids),
         "confidence_intervals": _bootstrap_metric_interval([], n_samples=0, seed=seed),
+        "grid_uniform_confidence_intervals": _bootstrap_grid_uniform_metric_interval([], n_samples=0, seed=seed),
         "notes": [
             "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
             "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
             "Timestep-uniform CE reports the mean masked-token CE across uniformly sampled timesteps, decoupling the metric from schedule-dependent mask counts.",
+            "Grid-uniform CE reports the mean batch-level denoising CE over a fixed cached timestep grid, giving an explicit schedule-agnostic diagnostic aggregate.",
         ],
     }
 
@@ -407,6 +535,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
     timestep_records: Dict[int, Dict[str, float]] = {}
     sampled_batch_metrics: List[Dict[str, float]] = []
     sampled_example_metrics: List[Dict[str, float]] = []
+    grid_batch_metrics: List[Dict[str, float]] = []
     sampled_timestep_histogram: Dict[int, int] = {}
 
     for batch_idx, batch_plan in enumerate(eval_plan["batches"]):
@@ -490,6 +619,8 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                     )
             else:
                 key = int(eval_t[0].item())
+                batch_ce = token_nll_sum / masked_count
+                batch_accuracy = correct / masked_count
                 rec = timestep_records.setdefault(
                     key,
                     {
@@ -505,6 +636,20 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 rec["mask_ratio_sum"] += masked_count / max(1, batch_active_tokens)
                 rec["examples"] += 1
                 rec["correct"] += correct
+                grid_batch_metrics.append(
+                    {
+                        "batch_index": batch_idx,
+                        "timestep": key,
+                        "nll_sum": token_nll_sum,
+                        "masked_tokens": masked_count,
+                        "correct_masked_tokens": correct,
+                        "avg_cross_entropy": batch_ce,
+                        "pseudo_perplexity": _safe_exp(batch_ce),
+                        "bits_per_masked_token": batch_ce / math.log(2.0),
+                        "masked_token_accuracy": batch_accuracy,
+                        "mean_mask_fraction": masked_count / max(1, batch_active_tokens),
+                    }
+                )
 
     if total_masked_tokens == 0:
         result = _empty_eval_result(
@@ -533,6 +678,13 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             )
 
         timestep_uniform_avg_ce = sampled_example_ce_sum / sampled_example_count if sampled_example_count else float("nan")
+        if grid_batch_metrics:
+            grid_uniform_avg_ce = sum(float(row["avg_cross_entropy"]) for row in grid_batch_metrics) / len(grid_batch_metrics)
+            grid_uniform_masked_token_accuracy = sum(float(row["masked_token_accuracy"]) for row in grid_batch_metrics) / len(grid_batch_metrics)
+        else:
+            grid_uniform_avg_ce = float("nan")
+            grid_uniform_masked_token_accuracy = float("nan")
+
         result = {
             "metric": "diffusion_pseudo_perplexity",
             "avg_cross_entropy": avg_ce,
@@ -542,6 +694,10 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             "timestep_uniform_avg_cross_entropy": timestep_uniform_avg_ce,
             "timestep_uniform_pseudo_perplexity": _safe_exp(timestep_uniform_avg_ce),
             "timestep_uniform_bits_per_masked_token": timestep_uniform_avg_ce / math.log(2.0) if not math.isnan(timestep_uniform_avg_ce) else float("nan"),
+            "grid_uniform_avg_cross_entropy": grid_uniform_avg_ce,
+            "grid_uniform_pseudo_perplexity": _safe_exp(grid_uniform_avg_ce),
+            "grid_uniform_bits_per_masked_token": grid_uniform_avg_ce / math.log(2.0) if not math.isnan(grid_uniform_avg_ce) else float("nan"),
+            "grid_uniform_masked_token_accuracy": grid_uniform_masked_token_accuracy,
             "sampled_example_count": sampled_example_count,
             "masked_tokens": total_masked_tokens,
             "n_batches": int(eval_plan.get("n_batches", 0)),
@@ -549,6 +705,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             "timestep_metrics": timestep_metrics,
             "sampled_batch_metrics": sampled_batch_metrics,
             "sampled_example_metrics": sampled_example_metrics,
+            "grid_batch_metrics": grid_batch_metrics,
             "sampled_timestep_histogram": {str(k): int(v) for k, v in sorted(sampled_timestep_histogram.items())},
             "excluded_token_ids": _normalize_excluded_token_ids(excluded_token_ids),
             "confidence_intervals": _bootstrap_metric_interval(
@@ -556,11 +713,18 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 n_samples=bootstrap_samples,
                 seed=int(eval_plan.get("seed", 0)),
             ),
+            "grid_uniform_confidence_intervals": _bootstrap_grid_uniform_metric_interval(
+                grid_batch_metrics,
+                n_samples=bootstrap_samples,
+                seed=int(eval_plan.get("seed", 0)),
+            ),
             "notes": [
                 "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
                 "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
                 "Timestep-uniform CE averages per-example masked-token CE over uniformly sampled timesteps, making schedule comparisons less sensitive to different mask-count profiles.",
+                "Grid-uniform CE averages batch-level denoising CE over a fixed cached timestep grid, giving an explicit schedule-agnostic comparison surface.",
                 "Confidence intervals are computed by bootstrapping over sampled evaluation batches from the shared cached plan.",
+                "Grid-uniform confidence intervals are computed by bootstrapping over cached batch-timestep diagnostic records.",
                 "Timestep diagnostics are evaluated on a shared cached batch/noise plan so schedule comparisons are paired and reproducible.",
             ],
         }
@@ -572,6 +736,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         "paired_noise": True,
         "paired_batches": True,
         "sampled_timestep_distribution": "uniform_integer_1_to_T",
+        "grid_uniform_aggregation": "mean_over_cached_batch_timestep_records",
         "bootstrap_samples": bootstrap_samples,
     }
     return result
@@ -691,6 +856,7 @@ def compare_schedule_checkpoints(
             "notes": [
                 "Both checkpoints are evaluated on the same cached batches.",
                 "Both schedules reuse the same underlying uniform random matrices, so differences come from the schedule mapping and the model, not fresh mask draws.",
+                "The comparison reports both sampled-timestep and fixed-grid-uniform aggregates.",
             ],
         },
         "models": models,
@@ -707,6 +873,9 @@ def compare_schedule_checkpoints(
             "masked_token_accuracy": models[1]["masked_token_accuracy"] - models[0]["masked_token_accuracy"],
             "timestep_uniform_pseudo_perplexity": models[1]["timestep_uniform_pseudo_perplexity"] - models[0]["timestep_uniform_pseudo_perplexity"],
             "timestep_uniform_avg_cross_entropy": models[1]["timestep_uniform_avg_cross_entropy"] - models[0]["timestep_uniform_avg_cross_entropy"],
+            "grid_uniform_pseudo_perplexity": models[1]["grid_uniform_pseudo_perplexity"] - models[0]["grid_uniform_pseudo_perplexity"],
+            "grid_uniform_avg_cross_entropy": models[1]["grid_uniform_avg_cross_entropy"] - models[0]["grid_uniform_avg_cross_entropy"],
+            "grid_uniform_masked_token_accuracy": models[1]["grid_uniform_masked_token_accuracy"] - models[0]["grid_uniform_masked_token_accuracy"],
         }
         comparison["winner"] = {
             "pseudo_perplexity": "cosine_schedule" if models[0]["pseudo_perplexity"] <= models[1]["pseudo_perplexity"] else "linear_schedule_baseline",
@@ -714,6 +883,9 @@ def compare_schedule_checkpoints(
             "masked_token_accuracy": "cosine_schedule" if models[0]["masked_token_accuracy"] >= models[1]["masked_token_accuracy"] else "linear_schedule_baseline",
             "timestep_uniform_pseudo_perplexity": "cosine_schedule" if models[0]["timestep_uniform_pseudo_perplexity"] <= models[1]["timestep_uniform_pseudo_perplexity"] else "linear_schedule_baseline",
             "timestep_uniform_avg_cross_entropy": "cosine_schedule" if models[0]["timestep_uniform_avg_cross_entropy"] <= models[1]["timestep_uniform_avg_cross_entropy"] else "linear_schedule_baseline",
+            "grid_uniform_pseudo_perplexity": "cosine_schedule" if models[0]["grid_uniform_pseudo_perplexity"] <= models[1]["grid_uniform_pseudo_perplexity"] else "linear_schedule_baseline",
+            "grid_uniform_avg_cross_entropy": "cosine_schedule" if models[0]["grid_uniform_avg_cross_entropy"] <= models[1]["grid_uniform_avg_cross_entropy"] else "linear_schedule_baseline",
+            "grid_uniform_masked_token_accuracy": "cosine_schedule" if models[0]["grid_uniform_masked_token_accuracy"] >= models[1]["grid_uniform_masked_token_accuracy"] else "linear_schedule_baseline",
         }
         comparison["timestep_deltas"] = [
             {
@@ -733,6 +905,8 @@ def compare_schedule_checkpoints(
             linear_batch_metrics=models[1].get("sampled_batch_metrics", []),
             cosine_example_metrics=models[0].get("sampled_example_metrics", []),
             linear_example_metrics=models[1].get("sampled_example_metrics", []),
+            cosine_grid_batch_metrics=models[0].get("grid_batch_metrics", []),
+            linear_grid_batch_metrics=models[1].get("grid_batch_metrics", []),
             n_samples=bootstrap_samples,
             seed=seed,
         )
