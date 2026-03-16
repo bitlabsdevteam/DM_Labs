@@ -47,6 +47,10 @@ def ensure_hf_model_card(
             f"- pseudo_perplexity: {eval_summary.get('pseudo_perplexity')}\n"
             f"- bits_per_masked_token: {eval_summary.get('bits_per_masked_token')}\n"
             f"- masked_token_accuracy: {eval_summary.get('masked_token_accuracy')}\n"
+            f"- timestep_uniform_avg_cross_entropy: {eval_summary.get('timestep_uniform_avg_cross_entropy')}\n"
+            f"- timestep_uniform_pseudo_perplexity: {eval_summary.get('timestep_uniform_pseudo_perplexity')}\n"
+            f"- timestep_uniform_bits_per_masked_token: {eval_summary.get('timestep_uniform_bits_per_masked_token')}\n"
+            f"- sampled_example_count: {eval_summary.get('sampled_example_count')}\n"
             f"- masked_tokens: {eval_summary.get('masked_tokens')}\n"
             f"- n_batches: {eval_summary.get('n_batches')}\n"
         )
@@ -76,8 +80,11 @@ def ensure_hf_model_card(
             "\n## Schedule comparison\n\n"
             f"- pseudo_perplexity_delta_linear_minus_cosine: {delta.get('pseudo_perplexity')}\n"
             f"- avg_cross_entropy_delta_linear_minus_cosine: {delta.get('avg_cross_entropy')}\n"
+            f"- timestep_uniform_pseudo_perplexity_delta_linear_minus_cosine: {delta.get('timestep_uniform_pseudo_perplexity')}\n"
+            f"- timestep_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_uniform_avg_cross_entropy')}\n"
             f"- masked_token_accuracy_delta_linear_minus_cosine: {delta.get('masked_token_accuracy')}\n"
             f"- winner_by_pseudo_perplexity: {winner.get('pseudo_perplexity')}\n"
+            f"- winner_by_timestep_uniform_pseudo_perplexity: {winner.get('timestep_uniform_pseudo_perplexity')}\n"
             f"- winner_by_accuracy: {winner.get('masked_token_accuracy')}\n"
         )
 

@@ -243,17 +243,23 @@ def _empty_eval_result(n_batches: int, seed: int, excluded_token_ids: Optional[S
         "pseudo_perplexity": float("nan"),
         "bits_per_masked_token": float("nan"),
         "masked_token_accuracy": float("nan"),
+        "timestep_uniform_avg_cross_entropy": float("nan"),
+        "timestep_uniform_pseudo_perplexity": float("nan"),
+        "timestep_uniform_bits_per_masked_token": float("nan"),
+        "sampled_example_count": 0,
         "masked_tokens": 0,
         "n_batches": n_batches,
         "seed": seed,
         "timestep_metrics": [],
         "sampled_batch_metrics": [],
+        "sampled_example_metrics": [],
         "sampled_timestep_histogram": {},
         "excluded_token_ids": _normalize_excluded_token_ids(excluded_token_ids),
         "confidence_intervals": _bootstrap_metric_interval([], n_samples=0, seed=seed),
         "notes": [
             "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
             "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
+            "Timestep-uniform CE reports the mean masked-token CE across uniformly sampled timesteps, decoupling the metric from schedule-dependent mask counts.",
         ],
     }
 
@@ -275,8 +281,11 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
     total_nll = 0.0
     total_masked_tokens = 0
     total_correct = 0
+    sampled_example_ce_sum = 0.0
+    sampled_example_count = 0
     timestep_records: Dict[int, Dict[str, float]] = {}
     sampled_batch_metrics: List[Dict[str, float]] = []
+    sampled_example_metrics: List[Dict[str, float]] = []
     sampled_timestep_histogram: Dict[int, int] = {}
 
     for batch_idx, batch_plan in enumerate(eval_plan["batches"]):
@@ -330,6 +339,32 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                         "sampled_timesteps": t_values,
                     }
                 )
+
+                for example_idx in range(input_ids.size(0)):
+                    example_mask = mask_positions[example_idx]
+                    example_masked_tokens = int(example_mask.sum().item())
+                    if example_masked_tokens == 0:
+                        continue
+                    example_logits = logits[example_idx][example_mask]
+                    example_targets = labels[example_idx][example_mask]
+                    example_nll_sum = float(F.cross_entropy(example_logits, example_targets, reduction="sum").item())
+                    example_ce = example_nll_sum / example_masked_tokens
+                    example_correct = int((example_logits.argmax(dim=-1) == example_targets).sum().item())
+                    sampled_example_ce_sum += example_ce
+                    sampled_example_count += 1
+                    sampled_example_metrics.append(
+                        {
+                            "batch_index": batch_idx,
+                            "example_index": example_idx,
+                            "timestep": int(eval_t[example_idx].item()),
+                            "nll_sum": example_nll_sum,
+                            "masked_tokens": example_masked_tokens,
+                            "avg_cross_entropy": example_ce,
+                            "pseudo_perplexity": _safe_exp(example_ce),
+                            "bits_per_masked_token": example_ce / math.log(2.0),
+                            "masked_token_accuracy": example_correct / example_masked_tokens,
+                        }
+                    )
             else:
                 key = int(eval_t[0].item())
                 rec = timestep_records.setdefault(
@@ -374,17 +409,23 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 }
             )
 
+        timestep_uniform_avg_ce = sampled_example_ce_sum / sampled_example_count if sampled_example_count else float("nan")
         result = {
             "metric": "diffusion_pseudo_perplexity",
             "avg_cross_entropy": avg_ce,
             "pseudo_perplexity": _safe_exp(avg_ce),
             "bits_per_masked_token": avg_ce / math.log(2.0),
             "masked_token_accuracy": total_correct / total_masked_tokens,
+            "timestep_uniform_avg_cross_entropy": timestep_uniform_avg_ce,
+            "timestep_uniform_pseudo_perplexity": _safe_exp(timestep_uniform_avg_ce),
+            "timestep_uniform_bits_per_masked_token": timestep_uniform_avg_ce / math.log(2.0) if not math.isnan(timestep_uniform_avg_ce) else float("nan"),
+            "sampled_example_count": sampled_example_count,
             "masked_tokens": total_masked_tokens,
             "n_batches": int(eval_plan.get("n_batches", 0)),
             "seed": int(eval_plan.get("seed", 0)),
             "timestep_metrics": timestep_metrics,
             "sampled_batch_metrics": sampled_batch_metrics,
+            "sampled_example_metrics": sampled_example_metrics,
             "sampled_timestep_histogram": {str(k): int(v) for k, v in sorted(sampled_timestep_histogram.items())},
             "excluded_token_ids": _normalize_excluded_token_ids(excluded_token_ids),
             "confidence_intervals": _bootstrap_metric_interval(
@@ -395,6 +436,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             "notes": [
                 "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
                 "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
+                "Timestep-uniform CE averages per-example masked-token CE over uniformly sampled timesteps, making schedule comparisons less sensitive to different mask-count profiles.",
                 "Confidence intervals are computed by bootstrapping over sampled evaluation batches from the shared cached plan.",
                 "Timestep diagnostics are evaluated on a shared cached batch/noise plan so schedule comparisons are paired and reproducible.",
             ],
@@ -540,11 +582,15 @@ def compare_schedule_checkpoints(
             "avg_cross_entropy": models[1]["avg_cross_entropy"] - models[0]["avg_cross_entropy"],
             "bits_per_masked_token": models[1]["bits_per_masked_token"] - models[0]["bits_per_masked_token"],
             "masked_token_accuracy": models[1]["masked_token_accuracy"] - models[0]["masked_token_accuracy"],
+            "timestep_uniform_pseudo_perplexity": models[1]["timestep_uniform_pseudo_perplexity"] - models[0]["timestep_uniform_pseudo_perplexity"],
+            "timestep_uniform_avg_cross_entropy": models[1]["timestep_uniform_avg_cross_entropy"] - models[0]["timestep_uniform_avg_cross_entropy"],
         }
         comparison["winner"] = {
             "pseudo_perplexity": "cosine_schedule" if models[0]["pseudo_perplexity"] <= models[1]["pseudo_perplexity"] else "linear_schedule_baseline",
             "avg_cross_entropy": "cosine_schedule" if models[0]["avg_cross_entropy"] <= models[1]["avg_cross_entropy"] else "linear_schedule_baseline",
             "masked_token_accuracy": "cosine_schedule" if models[0]["masked_token_accuracy"] >= models[1]["masked_token_accuracy"] else "linear_schedule_baseline",
+            "timestep_uniform_pseudo_perplexity": "cosine_schedule" if models[0]["timestep_uniform_pseudo_perplexity"] <= models[1]["timestep_uniform_pseudo_perplexity"] else "linear_schedule_baseline",
+            "timestep_uniform_avg_cross_entropy": "cosine_schedule" if models[0]["timestep_uniform_avg_cross_entropy"] <= models[1]["timestep_uniform_avg_cross_entropy"] else "linear_schedule_baseline",
         }
         comparison["timestep_deltas"] = [
             {
@@ -555,6 +601,7 @@ def compare_schedule_checkpoints(
                 "masked_token_accuracy": linear_metrics[t]["masked_token_accuracy"] - cosine_metrics[t]["masked_token_accuracy"],
                 "cosine_mean_mask_fraction": cosine_metrics[t]["mean_mask_fraction"],
                 "linear_mean_mask_fraction": linear_metrics[t]["mean_mask_fraction"],
+                "mask_fraction_delta_linear_minus_cosine": linear_metrics[t]["mean_mask_fraction"] - cosine_metrics[t]["mean_mask_fraction"],
             }
             for t in shared_timesteps
         ]

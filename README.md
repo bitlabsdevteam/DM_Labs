@@ -51,12 +51,13 @@ So this repo uses a **diffusion pseudo-perplexity** / denoising-based evaluation
 
 Current protocol improvements in the repo:
 - aggregate masked-token NLL by **token count**, not by naive per-batch averaging
+- also report a **timestep-uniform denoising CE / pseudo-perplexity** that averages per-example masked-token CE over uniformly sampled timesteps
 - report **bits per masked token** alongside pseudo-perplexity
 - report **masked-token accuracy** as a complementary denoising quality signal
 - expose **bootstrap confidence intervals** over sampled evaluation batches
 - expose **timestep-conditioned diagnostics** so schedule quality can be inspected across early/mid/late denoising
 - compare cosine vs linear checkpoints under a **shared cached batch set, shared timestep grid, and shared underlying uniform noise draws**
-- export **per-timestep linear-minus-cosine deltas** for tighter schedule analysis
+- export **per-timestep linear-minus-cosine deltas**, including mask-fraction deltas, for tighter schedule analysis
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts
 
 ## Current Notebook Capabilities
