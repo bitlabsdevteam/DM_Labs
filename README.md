@@ -19,10 +19,12 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
 - `dm_labs/eval_utils.py`
   - reusable diffusion evaluation helpers
   - token-weighted pseudo-perplexity computation
+  - cached shared-batch/shared-noise evaluation plans for reproducible comparisons
   - timestep-slice diagnostics for denoising quality
-  - shared-protocol cosine-vs-linear checkpoint comparison
+  - paired cosine-vs-linear checkpoint comparison using the same underlying corruption draws
 - `dm_labs/hf_utils.py`
   - reusable Hugging Face model-card + upload helpers
+  - persists `eval_summary.json` alongside uploaded artifacts
 
 ## Project Focus
 
@@ -49,7 +51,8 @@ Current protocol improvements in the repo:
 - aggregate masked-token NLL by **token count**, not by naive per-batch averaging
 - report **bits per masked token** alongside pseudo-perplexity
 - expose **timestep-conditioned diagnostics** so schedule quality can be inspected across early/mid/late denoising
-- compare cosine vs linear checkpoints under a **shared evaluation seed and timestep grid**
+- compare cosine vs linear checkpoints under a **shared cached batch set, shared timestep grid, and shared underlying uniform noise draws**
+- persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts
 
 ## Current Notebook Capabilities
 
