@@ -201,6 +201,29 @@ def _metric_percentiles(samples: Sequence[float]) -> Dict[str, float]:
     }
 
 
+def _compute_timestep_macro_metrics(timestep_metrics: Sequence[Dict[str, float]]) -> Dict[str, float]:
+    if not timestep_metrics:
+        return {
+            "timestep_macro_avg_cross_entropy": float("nan"),
+            "timestep_macro_pseudo_perplexity": float("nan"),
+            "timestep_macro_bits_per_masked_token": float("nan"),
+            "timestep_macro_masked_token_accuracy": float("nan"),
+            "timestep_macro_timestep_count": 0,
+        }
+
+    avg_cross_entropy_values = [float(row["avg_cross_entropy"]) for row in timestep_metrics]
+    masked_token_accuracy_values = [float(row["masked_token_accuracy"]) for row in timestep_metrics]
+    mean_ce = sum(avg_cross_entropy_values) / len(avg_cross_entropy_values)
+    mean_acc = sum(masked_token_accuracy_values) / len(masked_token_accuracy_values)
+    return {
+        "timestep_macro_avg_cross_entropy": mean_ce,
+        "timestep_macro_pseudo_perplexity": _safe_exp(mean_ce),
+        "timestep_macro_bits_per_masked_token": mean_ce / math.log(2.0),
+        "timestep_macro_masked_token_accuracy": mean_acc,
+        "timestep_macro_timestep_count": len(timestep_metrics),
+    }
+
+
 def _bootstrap_paired_comparison_interval(
     cosine_batch_metrics: Sequence[Dict[str, float]],
     linear_batch_metrics: Sequence[Dict[str, float]],
@@ -492,6 +515,11 @@ def _empty_eval_result(n_batches: int, seed: int, excluded_token_ids: Optional[S
         "grid_uniform_pseudo_perplexity": float("nan"),
         "grid_uniform_bits_per_masked_token": float("nan"),
         "grid_uniform_masked_token_accuracy": float("nan"),
+        "timestep_macro_avg_cross_entropy": float("nan"),
+        "timestep_macro_pseudo_perplexity": float("nan"),
+        "timestep_macro_bits_per_masked_token": float("nan"),
+        "timestep_macro_masked_token_accuracy": float("nan"),
+        "timestep_macro_timestep_count": 0,
         "sampled_example_count": 0,
         "masked_tokens": 0,
         "n_batches": n_batches,
@@ -684,6 +712,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         else:
             grid_uniform_avg_ce = float("nan")
             grid_uniform_masked_token_accuracy = float("nan")
+        timestep_macro_metrics = _compute_timestep_macro_metrics(timestep_metrics)
 
         result = {
             "metric": "diffusion_pseudo_perplexity",
@@ -698,6 +727,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             "grid_uniform_pseudo_perplexity": _safe_exp(grid_uniform_avg_ce),
             "grid_uniform_bits_per_masked_token": grid_uniform_avg_ce / math.log(2.0) if not math.isnan(grid_uniform_avg_ce) else float("nan"),
             "grid_uniform_masked_token_accuracy": grid_uniform_masked_token_accuracy,
+            **timestep_macro_metrics,
             "sampled_example_count": sampled_example_count,
             "masked_tokens": total_masked_tokens,
             "n_batches": int(eval_plan.get("n_batches", 0)),
@@ -723,6 +753,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
                 "Timestep-uniform CE averages per-example masked-token CE over uniformly sampled timesteps, making schedule comparisons less sensitive to different mask-count profiles.",
                 "Grid-uniform CE averages batch-level denoising CE over a fixed cached timestep grid, giving an explicit schedule-agnostic comparison surface.",
+                "Timestep-macro CE averages token-weighted per-timestep denoising CE equally over the explicit diagnostic grid, making each denoising stage contribute the same top-level weight.",
                 "Confidence intervals are computed by bootstrapping over sampled evaluation batches from the shared cached plan.",
                 "Grid-uniform confidence intervals are computed by bootstrapping over cached batch-timestep diagnostic records.",
                 "Timestep diagnostics are evaluated on a shared cached batch/noise plan so schedule comparisons are paired and reproducible.",
@@ -737,6 +768,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         "paired_batches": True,
         "sampled_timestep_distribution": "uniform_integer_1_to_T",
         "grid_uniform_aggregation": "mean_over_cached_batch_timestep_records",
+        "timestep_macro_aggregation": "mean_over_token_weighted_per_timestep_metrics_on_cached_grid",
         "bootstrap_samples": bootstrap_samples,
     }
     return result
@@ -876,6 +908,10 @@ def compare_schedule_checkpoints(
             "grid_uniform_pseudo_perplexity": models[1]["grid_uniform_pseudo_perplexity"] - models[0]["grid_uniform_pseudo_perplexity"],
             "grid_uniform_avg_cross_entropy": models[1]["grid_uniform_avg_cross_entropy"] - models[0]["grid_uniform_avg_cross_entropy"],
             "grid_uniform_masked_token_accuracy": models[1]["grid_uniform_masked_token_accuracy"] - models[0]["grid_uniform_masked_token_accuracy"],
+            "timestep_macro_pseudo_perplexity": models[1]["timestep_macro_pseudo_perplexity"] - models[0]["timestep_macro_pseudo_perplexity"],
+            "timestep_macro_avg_cross_entropy": models[1]["timestep_macro_avg_cross_entropy"] - models[0]["timestep_macro_avg_cross_entropy"],
+            "timestep_macro_bits_per_masked_token": models[1]["timestep_macro_bits_per_masked_token"] - models[0]["timestep_macro_bits_per_masked_token"],
+            "timestep_macro_masked_token_accuracy": models[1]["timestep_macro_masked_token_accuracy"] - models[0]["timestep_macro_masked_token_accuracy"],
         }
         comparison["winner"] = {
             "pseudo_perplexity": "cosine_schedule" if models[0]["pseudo_perplexity"] <= models[1]["pseudo_perplexity"] else "linear_schedule_baseline",
@@ -886,6 +922,9 @@ def compare_schedule_checkpoints(
             "grid_uniform_pseudo_perplexity": "cosine_schedule" if models[0]["grid_uniform_pseudo_perplexity"] <= models[1]["grid_uniform_pseudo_perplexity"] else "linear_schedule_baseline",
             "grid_uniform_avg_cross_entropy": "cosine_schedule" if models[0]["grid_uniform_avg_cross_entropy"] <= models[1]["grid_uniform_avg_cross_entropy"] else "linear_schedule_baseline",
             "grid_uniform_masked_token_accuracy": "cosine_schedule" if models[0]["grid_uniform_masked_token_accuracy"] >= models[1]["grid_uniform_masked_token_accuracy"] else "linear_schedule_baseline",
+            "timestep_macro_pseudo_perplexity": "cosine_schedule" if models[0]["timestep_macro_pseudo_perplexity"] <= models[1]["timestep_macro_pseudo_perplexity"] else "linear_schedule_baseline",
+            "timestep_macro_avg_cross_entropy": "cosine_schedule" if models[0]["timestep_macro_avg_cross_entropy"] <= models[1]["timestep_macro_avg_cross_entropy"] else "linear_schedule_baseline",
+            "timestep_macro_masked_token_accuracy": "cosine_schedule" if models[0]["timestep_macro_masked_token_accuracy"] >= models[1]["timestep_macro_masked_token_accuracy"] else "linear_schedule_baseline",
         }
         comparison["timestep_deltas"] = [
             {
