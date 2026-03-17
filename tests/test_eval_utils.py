@@ -59,6 +59,49 @@ class EvalPlanRemapTests(unittest.TestCase):
         self.assertEqual([row["timestep_fraction"] for row in metrics], [0.5, 1.0])
         self.assertTrue(result["eval_protocol"]["normalized_timestep_remapping"])
 
+    def test_timestep_auc_matches_constant_metric_surface(self):
+        plan = {
+            "n_batches": 1,
+            "seed": 0,
+            "T": 10,
+            "timestep_grid": [2, 5, 10],
+            "batches": [
+                {
+                    "input_ids": self.batch["input_ids"],
+                    "attention_mask": self.batch["attention_mask"],
+                    "active_tokens": 4,
+                    "timestep_plans": [
+                        {"kind": "grid", "t": torch.tensor([2]), "u": torch.tensor([0.2]), "rand": torch.zeros((1, 4))},
+                        {"kind": "grid", "t": torch.tensor([5]), "u": torch.tensor([0.5]), "rand": torch.zeros((1, 4))},
+                        {"kind": "grid", "t": torch.tensor([10]), "u": torch.tensor([1.0]), "rand": torch.zeros((1, 4))},
+                    ],
+                }
+            ],
+        }
+        model = ConstantLogitModel(vocab_size=8)
+
+        def corruption_fn(input_ids, attention_mask, t, mask_token_id, T, excluded_token_ids=None, rand=None, generator=None):
+            labels = input_ids.clone()
+            mask_positions = torch.ones_like(input_ids, dtype=torch.bool)
+            noisy = torch.full_like(input_ids, mask_token_id)
+            return noisy, labels, mask_positions
+
+        result = evaluate_diffusion_pseudo_perplexity_from_plan(
+            model=model,
+            eval_plan=plan,
+            corruption_fn=corruption_fn,
+            mask_token_id=0,
+            T=10,
+            schedule_name="cosine",
+            bootstrap_samples=8,
+        )
+        expected_ce = torch.log(torch.tensor(8.0)).item()
+        self.assertAlmostEqual(result["timestep_auc_avg_cross_entropy"], expected_ce, places=6)
+        self.assertAlmostEqual(result["timestep_auc_pseudo_perplexity"], 8.0, places=6)
+        self.assertAlmostEqual(result["timestep_auc_masked_token_accuracy"], 0.125, places=6)
+        self.assertAlmostEqual(result["timestep_auc_fraction_span"], 0.8, places=6)
+        self.assertEqual(result["timestep_auc_timestep_count"], 3)
+
 
 class ScheduleComparisonRemapTests(unittest.TestCase):
     def _write_checkpoint(self, root: Path, diffusion_steps: int) -> Path:
@@ -110,6 +153,8 @@ class ScheduleComparisonRemapTests(unittest.TestCase):
         self.assertEqual([row["source_plan_timestep"] for row in deltas], [5, 10])
         self.assertEqual([row["cosine_timestep"] for row in deltas], [5, 10])
         self.assertEqual([row["linear_timestep"] for row in deltas], [10, 20])
+        self.assertIn("timestep_auc_pseudo_perplexity", comparison["delta"])
+        self.assertIn("timestep_auc_pseudo_perplexity", comparison["winner"])
 
 
 if __name__ == "__main__":

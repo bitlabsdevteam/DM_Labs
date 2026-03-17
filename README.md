@@ -22,6 +22,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - timestep-uniform denoising CE / pseudo-perplexity
   - fixed-grid-uniform denoising CE / pseudo-perplexity over cached diagnostic timesteps
   - equal-weight-over-timestep macro denoising CE / pseudo-perplexity on the cached diagnostic grid
+  - normalized timestep-fraction AUC denoising CE / pseudo-perplexity over the cached diagnostic grid
   - bootstrap confidence intervals over sampled eval batches
   - bootstrap confidence intervals over cached batch-timestep grid records
   - masked-token accuracy + timestep-slice denoising diagnostics
@@ -60,6 +61,7 @@ Current protocol improvements in the repo:
 - also report a **timestep-uniform denoising CE / pseudo-perplexity** that averages per-example masked-token CE over uniformly sampled timesteps
 - also report a **grid-uniform denoising CE / pseudo-perplexity** that averages over a fixed cached timestep grid shared across schedule comparisons
 - also report a **timestep-macro denoising CE / pseudo-perplexity** that gives equal top-level weight to each diagnostic timestep on the shared grid
+- also report a **timestep-AUC denoising CE / pseudo-perplexity** that integrates over normalized timestep fraction, so irregular diagnostic grids do not over-weight densely sampled regions
 - report **bits per masked token** alongside pseudo-perplexity
 - report **masked-token accuracy** as a complementary denoising quality signal
 - expose **bootstrap confidence intervals** over sampled evaluation batches
@@ -69,6 +71,7 @@ Current protocol improvements in the repo:
 - export **per-timestep linear-minus-cosine deltas**, including mask-fraction deltas, for tighter schedule analysis
 - attach **paired bootstrap delta intervals** so schedule winners are reported with uncertainty, not just point estimates
 - attach **paired timestep-macro bootstrap intervals** so equal-weight-over-timestep schedule claims are uncertainty-aware too
+- surface a **normalized timestep-fraction AUC** view so schedule comparisons can summarize the denoising trajectory without depending on equal timestep spacing
 - expose a **fixed-grid shared-timestep aggregate** plus paired uncertainty so cosine-vs-linear claims can be checked on an explicit common denoising surface
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts
 - surface when normalized timestep remapping was used in cross-checkpoint comparisons and Hugging Face artifacts

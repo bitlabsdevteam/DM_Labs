@@ -47,12 +47,15 @@ def ensure_hf_model_card(
             f"| token_weighted_sampled | {eval_summary.get('avg_cross_entropy')} | {eval_summary.get('pseudo_perplexity')} | {eval_summary.get('bits_per_masked_token')} | {eval_summary.get('masked_token_accuracy')} |\n"
             f"| timestep_uniform_sampled | {eval_summary.get('timestep_uniform_avg_cross_entropy')} | {eval_summary.get('timestep_uniform_pseudo_perplexity')} | {eval_summary.get('timestep_uniform_bits_per_masked_token')} | n/a |\n"
             f"| fixed_grid_batch_uniform | {eval_summary.get('grid_uniform_avg_cross_entropy')} | {eval_summary.get('grid_uniform_pseudo_perplexity')} | {eval_summary.get('grid_uniform_bits_per_masked_token')} | {eval_summary.get('grid_uniform_masked_token_accuracy')} |\n"
-            f"| fixed_grid_timestep_macro | {eval_summary.get('timestep_macro_avg_cross_entropy')} | {eval_summary.get('timestep_macro_pseudo_perplexity')} | {eval_summary.get('timestep_macro_bits_per_masked_token')} | {eval_summary.get('timestep_macro_masked_token_accuracy')} |\n\n"
+            f"| fixed_grid_timestep_macro | {eval_summary.get('timestep_macro_avg_cross_entropy')} | {eval_summary.get('timestep_macro_pseudo_perplexity')} | {eval_summary.get('timestep_macro_bits_per_masked_token')} | {eval_summary.get('timestep_macro_masked_token_accuracy')} |\n"
+            f"| fixed_grid_timestep_auc | {eval_summary.get('timestep_auc_avg_cross_entropy')} | {eval_summary.get('timestep_auc_pseudo_perplexity')} | {eval_summary.get('timestep_auc_bits_per_masked_token')} | {eval_summary.get('timestep_auc_masked_token_accuracy')} |\n\n"
             f"- metric: {eval_summary.get('metric', 'diffusion_pseudo_perplexity')}\n"
             f"- sampled_example_count: {eval_summary.get('sampled_example_count')}\n"
             f"- masked_tokens: {eval_summary.get('masked_tokens')}\n"
             f"- n_batches: {eval_summary.get('n_batches')}\n"
             f"- timestep_macro_timestep_count: {eval_summary.get('timestep_macro_timestep_count')}\n"
+            f"- timestep_auc_timestep_count: {eval_summary.get('timestep_auc_timestep_count')}\n"
+            f"- timestep_auc_fraction_span: {eval_summary.get('timestep_auc_fraction_span')}\n"
         )
         ci = eval_summary.get("confidence_intervals") or {}
         ppx_ci = ci.get("pseudo_perplexity") or {}
@@ -81,6 +84,7 @@ def ensure_hf_model_card(
                 f"- sampled_timestep_distribution: {protocol.get('sampled_timestep_distribution')}\n"
                 f"- grid_uniform_aggregation: {protocol.get('grid_uniform_aggregation')}\n"
                 f"- timestep_macro_aggregation: {protocol.get('timestep_macro_aggregation')}\n"
+                f"- timestep_auc_aggregation: {protocol.get('timestep_auc_aggregation')}\n"
                 f"- bootstrap_samples: {protocol.get('bootstrap_samples')}\n"
             )
 
@@ -103,14 +107,18 @@ def ensure_hf_model_card(
             f"| timestep_uniform_pseudo_perplexity | {delta.get('timestep_uniform_pseudo_perplexity')} | {winner.get('timestep_uniform_pseudo_perplexity')} | bootstrap_p05_p95=[{uniform_ppx_ci.get('p05')}, {uniform_ppx_ci.get('p95')}], p_linear_better={uniform_ppx_ci.get('probability_linear_better')} |\n"
             f"| grid_uniform_pseudo_perplexity | {delta.get('grid_uniform_pseudo_perplexity')} | {winner.get('grid_uniform_pseudo_perplexity')} | bootstrap_p05_p95=[{grid_ppx_ci.get('p05')}, {grid_ppx_ci.get('p95')}], p_linear_better={grid_ppx_ci.get('probability_linear_better')} |\n"
             f"| timestep_macro_pseudo_perplexity | {delta.get('timestep_macro_pseudo_perplexity')} | {winner.get('timestep_macro_pseudo_perplexity')} | bootstrap_p05_p95=[{macro_ppx_ci.get('p05')}, {macro_ppx_ci.get('p95')}], p_linear_better={macro_ppx_ci.get('probability_linear_better')} |\n"
+            f"| timestep_auc_pseudo_perplexity | {delta.get('timestep_auc_pseudo_perplexity')} | {winner.get('timestep_auc_pseudo_perplexity')} | normalized_trapezoid_over_timestep_fraction |\n"
             f"| sampled_accuracy | {delta.get('masked_token_accuracy')} | {winner.get('masked_token_accuracy')} | bootstrap_p05_p95=[{acc_ci.get('p05')}, {acc_ci.get('p95')}], p_linear_better={acc_ci.get('probability_linear_better')} |\n"
             f"| grid_uniform_accuracy | {delta.get('grid_uniform_masked_token_accuracy')} | {winner.get('grid_uniform_masked_token_accuracy')} | bootstrap_p05_p95=[{grid_acc_ci.get('p05')}, {grid_acc_ci.get('p95')}], p_linear_better={grid_acc_ci.get('probability_linear_better')} |\n"
-            f"| timestep_macro_accuracy | {delta.get('timestep_macro_masked_token_accuracy')} | {winner.get('timestep_macro_masked_token_accuracy')} | bootstrap_p05_p95=[{macro_acc_ci.get('p05')}, {macro_acc_ci.get('p95')}], p_linear_better={macro_acc_ci.get('probability_linear_better')} |\n\n"
+            f"| timestep_macro_accuracy | {delta.get('timestep_macro_masked_token_accuracy')} | {winner.get('timestep_macro_masked_token_accuracy')} | bootstrap_p05_p95=[{macro_acc_ci.get('p05')}, {macro_acc_ci.get('p95')}], p_linear_better={macro_acc_ci.get('probability_linear_better')} |\n"
+            f"| timestep_auc_accuracy | {delta.get('timestep_auc_masked_token_accuracy')} | {winner.get('timestep_auc_masked_token_accuracy')} | normalized_trapezoid_over_timestep_fraction |\n\n"
             f"- avg_cross_entropy_delta_linear_minus_cosine: {delta.get('avg_cross_entropy')}\n"
             f"- timestep_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_uniform_avg_cross_entropy')}\n"
             f"- grid_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('grid_uniform_avg_cross_entropy')}\n"
             f"- timestep_macro_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_macro_avg_cross_entropy')}\n"
             f"- timestep_macro_bits_per_masked_token_delta_linear_minus_cosine: {delta.get('timestep_macro_bits_per_masked_token')}\n"
+            f"- timestep_auc_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_auc_avg_cross_entropy')}\n"
+            f"- timestep_auc_bits_per_masked_token_delta_linear_minus_cosine: {delta.get('timestep_auc_bits_per_masked_token')}\n"
         )
 
     readme_path.write_text(
