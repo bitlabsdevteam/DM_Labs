@@ -20,6 +20,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - reusable diffusion evaluation helpers
   - token-weighted pseudo-perplexity computation
   - timestep-uniform denoising CE / pseudo-perplexity
+  - mask-ratio-reweighted sampled denoising CE / pseudo-perplexity for schedule-corrected sampled evaluation
   - fixed-grid-uniform denoising CE / pseudo-perplexity over cached diagnostic timesteps
   - equal-weight-over-timestep macro denoising CE / pseudo-perplexity on the cached diagnostic grid
   - normalized timestep-fraction AUC denoising CE / pseudo-perplexity over the cached diagnostic grid
@@ -60,6 +61,7 @@ So this repo uses a **diffusion pseudo-perplexity** / denoising-based evaluation
 Current protocol improvements in the repo:
 - aggregate masked-token NLL by **token count**, not by naive per-batch averaging
 - also report a **timestep-uniform denoising CE / pseudo-perplexity** that averages per-example masked-token CE over uniformly sampled timesteps
+- also report a **schedule-reweighted sampled denoising CE / pseudo-perplexity** that applies inverse expected mask-ratio weights, so sampled-batch evaluation better approximates a uniform-over-mask-eligible-token-and-timestep denoising objective
 - also report a **grid-uniform denoising CE / pseudo-perplexity** that averages over a fixed cached timestep grid shared across schedule comparisons
 - also report a **timestep-macro denoising CE / pseudo-perplexity** that gives equal top-level weight to each diagnostic timestep on the shared grid
 - also report a **timestep-AUC denoising CE / pseudo-perplexity** that integrates over normalized timestep fraction, so irregular diagnostic grids do not over-weight densely sampled regions

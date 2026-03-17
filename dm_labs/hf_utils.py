@@ -63,6 +63,12 @@ def ensure_hf_model_card(
             metrics_block += (
                 f"- pseudo_perplexity_bootstrap_p05_p95: [{ppx_ci.get('p05')}, {ppx_ci.get('p95')}]\n"
             )
+        reweighted_ci = eval_summary.get("schedule_reweighted_confidence_intervals") or {}
+        reweighted_ppx_ci = reweighted_ci.get("schedule_reweighted_pseudo_perplexity") or {}
+        if reweighted_ppx_ci:
+            metrics_block += (
+                f"- schedule_reweighted_pseudo_perplexity_bootstrap_p05_p95: [{reweighted_ppx_ci.get('p05')}, {reweighted_ppx_ci.get('p95')}]\n"
+            )
         grid_ci = eval_summary.get("grid_uniform_confidence_intervals") or {}
         grid_ppx_ci = grid_ci.get("grid_uniform_pseudo_perplexity") or {}
         if grid_ppx_ci:
@@ -105,10 +111,13 @@ def ensure_hf_model_card(
         delta_ci = ((comparison_summary.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {})
         ppx_ci = delta_ci.get("pseudo_perplexity") or {}
         uniform_ppx_ci = delta_ci.get("timestep_uniform_pseudo_perplexity") or {}
+        reweighted_ppx_ci = delta_ci.get("schedule_reweighted_pseudo_perplexity") or {}
         grid_ppx_ci = delta_ci.get("grid_uniform_pseudo_perplexity") or {}
         macro_ppx_ci = delta_ci.get("timestep_macro_pseudo_perplexity") or {}
         auc_ppx_ci = delta_ci.get("timestep_auc_pseudo_perplexity") or {}
         acc_ci = delta_ci.get("masked_token_accuracy") or {}
+        uniform_acc_ci = delta_ci.get("timestep_uniform_masked_token_accuracy") or {}
+        reweighted_acc_ci = delta_ci.get("schedule_reweighted_masked_token_accuracy") or {}
         grid_acc_ci = delta_ci.get("grid_uniform_masked_token_accuracy") or {}
         macro_acc_ci = delta_ci.get("timestep_macro_masked_token_accuracy") or {}
         auc_acc_ci = delta_ci.get("timestep_auc_masked_token_accuracy") or {}

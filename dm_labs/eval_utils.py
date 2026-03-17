@@ -127,6 +127,85 @@ def _bootstrap_metric_interval(
     }
 
 
+def _bootstrap_reweighted_metric_interval(
+    example_records: Sequence[Dict[str, float]],
+    *,
+    weight_key: str,
+    n_samples: int = 500,
+    seed: int = 0,
+) -> Dict[str, object]:
+    metric_prefix = weight_key.replace("_weight", "")
+    ce_key = f"{metric_prefix}_avg_cross_entropy"
+    ppx_key = f"{metric_prefix}_pseudo_perplexity"
+    bits_key = f"{metric_prefix}_bits_per_masked_token"
+    acc_key = f"{metric_prefix}_masked_token_accuracy"
+
+    if not example_records:
+        return {
+            "method": f"bootstrap_over_example_records_with_{weight_key}",
+            "n_examples": 0,
+            "replicates": 0,
+            ce_key: {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            ppx_key: {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            bits_key: {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            acc_key: {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+        }
+
+    rng = torch.Generator(device="cpu")
+    rng.manual_seed(seed)
+    n = len(example_records)
+    ce_samples: List[float] = []
+    acc_samples: List[float] = []
+
+    for _ in range(n_samples):
+        indices = torch.randint(0, n, (n,), generator=rng)
+        weighted_nll = 0.0
+        weighted_tokens = 0.0
+        weighted_correct = 0.0
+        for idx in indices.tolist():
+            rec = example_records[idx]
+            weight = float(rec.get(weight_key, 0.0))
+            if weight <= 0.0:
+                continue
+            weighted_nll += float(rec["nll_sum"]) * weight
+            weighted_tokens += float(rec["masked_tokens"]) * weight
+            weighted_correct += float(rec.get("correct_masked_tokens", 0)) * weight
+        if weighted_tokens <= 0.0:
+            continue
+        ce_samples.append(weighted_nll / weighted_tokens)
+        acc_samples.append(weighted_correct / weighted_tokens)
+
+    if not ce_samples:
+        return {
+            "method": f"bootstrap_over_example_records_with_{weight_key}",
+            "n_examples": n,
+            "replicates": 0,
+            ce_key: {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            ppx_key: {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            bits_key: {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            acc_key: {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+        }
+
+    ce_tensor = torch.tensor(ce_samples, dtype=torch.float64)
+    ce_q = torch.quantile(ce_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    ppx_tensor = torch.tensor([_safe_exp(float(v)) for v in ce_samples], dtype=torch.float64)
+    ppx_q = torch.quantile(ppx_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    bits_tensor = torch.tensor([float(v) / math.log(2.0) for v in ce_samples], dtype=torch.float64)
+    bits_q = torch.quantile(bits_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    acc_tensor = torch.tensor(acc_samples, dtype=torch.float64)
+    acc_q = torch.quantile(acc_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+
+    return {
+        "method": f"bootstrap_over_example_records_with_{weight_key}",
+        "n_examples": n,
+        "replicates": len(ce_samples),
+        ce_key: {"mean": float(ce_tensor.mean().item()), "p05": float(ce_q[0]), "p50": float(ce_q[1]), "p95": float(ce_q[2])},
+        ppx_key: {"mean": float(ppx_tensor.mean().item()), "p05": float(ppx_q[0]), "p50": float(ppx_q[1]), "p95": float(ppx_q[2])},
+        bits_key: {"mean": float(bits_tensor.mean().item()), "p05": float(bits_q[0]), "p50": float(bits_q[1]), "p95": float(bits_q[2])},
+        acc_key: {"mean": float(acc_tensor.mean().item()), "p05": float(acc_q[0]), "p50": float(acc_q[1]), "p95": float(acc_q[2])},
+    }
+
+
 def _bootstrap_grid_uniform_metric_interval(
     grid_batch_records: Sequence[Dict[str, float]],
     *,
@@ -425,6 +504,10 @@ def _bootstrap_paired_comparison_interval(
         "timestep_uniform_pseudo_perplexity": [],
         "timestep_uniform_bits_per_masked_token": [],
         "timestep_uniform_masked_token_accuracy": [],
+        "schedule_reweighted_avg_cross_entropy": [],
+        "schedule_reweighted_pseudo_perplexity": [],
+        "schedule_reweighted_bits_per_masked_token": [],
+        "schedule_reweighted_masked_token_accuracy": [],
     }
     grid_delta_samples = {
         "grid_uniform_avg_cross_entropy": [],
@@ -494,6 +577,35 @@ def _bootstrap_paired_comparison_interval(
                     example_delta_samples["timestep_uniform_masked_token_accuracy"].append(
                         (sum(linear_example_acc) / len(linear_example_acc)) - (sum(cosine_example_acc) / len(cosine_example_acc))
                     )
+
+                    cosine_rw_nll = 0.0
+                    linear_rw_nll = 0.0
+                    cosine_rw_tokens = 0.0
+                    linear_rw_tokens = 0.0
+                    cosine_rw_correct = 0.0
+                    linear_rw_correct = 0.0
+                    for idx in example_indices.tolist():
+                        cosine_rec = cosine_example_metrics[idx]
+                        linear_rec = linear_example_metrics[idx]
+                        cosine_weight = float(cosine_rec.get("schedule_reweighted_weight", 0.0))
+                        linear_weight = float(linear_rec.get("schedule_reweighted_weight", 0.0))
+                        if cosine_weight > 0.0:
+                            cosine_rw_nll += float(cosine_rec["nll_sum"]) * cosine_weight
+                            cosine_rw_tokens += float(cosine_rec["masked_tokens"]) * cosine_weight
+                            cosine_rw_correct += float(cosine_rec.get("correct_masked_tokens", 0)) * cosine_weight
+                        if linear_weight > 0.0:
+                            linear_rw_nll += float(linear_rec["nll_sum"]) * linear_weight
+                            linear_rw_tokens += float(linear_rec["masked_tokens"]) * linear_weight
+                            linear_rw_correct += float(linear_rec.get("correct_masked_tokens", 0)) * linear_weight
+                    if cosine_rw_tokens > 0.0 and linear_rw_tokens > 0.0:
+                        cosine_rw_ce = cosine_rw_nll / cosine_rw_tokens
+                        linear_rw_ce = linear_rw_nll / linear_rw_tokens
+                        example_delta_samples["schedule_reweighted_avg_cross_entropy"].append(linear_rw_ce - cosine_rw_ce)
+                        example_delta_samples["schedule_reweighted_pseudo_perplexity"].append(_safe_exp(linear_rw_ce) - _safe_exp(cosine_rw_ce))
+                        example_delta_samples["schedule_reweighted_bits_per_masked_token"].append((linear_rw_ce - cosine_rw_ce) / math.log(2.0))
+                        example_delta_samples["schedule_reweighted_masked_token_accuracy"].append(
+                            (linear_rw_correct / linear_rw_tokens) - (cosine_rw_correct / cosine_rw_tokens)
+                        )
 
         if cosine_grid_batch_metrics is not None and linear_grid_batch_metrics is not None:
             n_grid_records = len(cosine_grid_batch_metrics)
@@ -595,13 +707,20 @@ def mask_ratio_linear_schedule(t: Tensor, T: int) -> Tensor:
     return torch.clamp(t.float() / float(T), min=0.0, max=1.0)
 
 
+def _resolve_schedule_fn(schedule_name: Optional[str]) -> Optional[Callable[[Tensor, int], Tensor]]:
+    if schedule_name is None:
+        return None
+    normalized = schedule_name.lower().strip()
+    if normalized == "cosine":
+        return mask_ratio_cosine_schedule
+    if normalized == "linear":
+        return mask_ratio_linear_schedule
+    raise ValueError(f"Unknown schedule_name={schedule_name!r}. Expected 'cosine' or 'linear'.")
+
+
 def corruption_factory(schedule_name: str) -> Callable[..., Tuple[Tensor, Tensor, Tensor]]:
-    schedule_name = schedule_name.lower().strip()
-    if schedule_name == "cosine":
-        schedule_fn = mask_ratio_cosine_schedule
-    elif schedule_name == "linear":
-        schedule_fn = mask_ratio_linear_schedule
-    else:
+    schedule_fn = _resolve_schedule_fn(schedule_name)
+    if schedule_fn is None:
         raise ValueError(f"Unknown schedule_name={schedule_name!r}. Expected 'cosine' or 'linear'.")
 
     def _corrupt_with_mask(
@@ -737,6 +856,11 @@ def _empty_eval_result(n_batches: int, seed: int, excluded_token_ids: Optional[S
         "timestep_uniform_avg_cross_entropy": float("nan"),
         "timestep_uniform_pseudo_perplexity": float("nan"),
         "timestep_uniform_bits_per_masked_token": float("nan"),
+        "timestep_uniform_masked_token_accuracy": float("nan"),
+        "schedule_reweighted_avg_cross_entropy": float("nan"),
+        "schedule_reweighted_pseudo_perplexity": float("nan"),
+        "schedule_reweighted_bits_per_masked_token": float("nan"),
+        "schedule_reweighted_masked_token_accuracy": float("nan"),
         "grid_uniform_avg_cross_entropy": float("nan"),
         "grid_uniform_pseudo_perplexity": float("nan"),
         "grid_uniform_bits_per_masked_token": float("nan"),
@@ -763,12 +887,14 @@ def _empty_eval_result(n_batches: int, seed: int, excluded_token_ids: Optional[S
         "sampled_timestep_histogram": {},
         "excluded_token_ids": _normalize_excluded_token_ids(excluded_token_ids),
         "confidence_intervals": _bootstrap_metric_interval([], n_samples=0, seed=seed),
+        "schedule_reweighted_confidence_intervals": _bootstrap_reweighted_metric_interval([], weight_key="schedule_reweighted_weight", n_samples=0, seed=seed),
         "grid_uniform_confidence_intervals": _bootstrap_grid_uniform_metric_interval([], n_samples=0, seed=seed),
         "timestep_confidence_intervals": _bootstrap_timestep_metric_interval([], n_samples=0, seed=seed),
         "notes": [
             "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
             "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
             "Timestep-uniform CE reports the mean masked-token CE across uniformly sampled timesteps, decoupling the metric from schedule-dependent mask counts.",
+            "Schedule-reweighted CE applies inverse expected mask-ratio weights to sampled masked tokens, estimating a uniform-over-mask-eligible-token-and-timestep denoising objective directly from sampled batches.",
             "Grid-uniform CE reports the mean batch-level denoising CE over a fixed cached timestep grid, giving an explicit schedule-agnostic diagnostic aggregate.",
         ],
     }
@@ -792,7 +918,12 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
     total_masked_tokens = 0
     total_correct = 0
     sampled_example_ce_sum = 0.0
+    sampled_example_accuracy_sum = 0.0
     sampled_example_count = 0
+    schedule_fn = _resolve_schedule_fn(schedule_name)
+    schedule_reweighted_nll_sum = 0.0
+    schedule_reweighted_masked_tokens = 0.0
+    schedule_reweighted_correct = 0.0
     timestep_records: Dict[int, Dict[str, float]] = {}
     sampled_batch_metrics: List[Dict[str, float]] = []
     sampled_example_metrics: List[Dict[str, float]] = []
@@ -866,8 +997,18 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                     example_nll_sum = float(F.cross_entropy(example_logits, example_targets, reduction="sum").item())
                     example_ce = example_nll_sum / example_masked_tokens
                     example_correct = int((example_logits.argmax(dim=-1) == example_targets).sum().item())
+                    example_accuracy = example_correct / example_masked_tokens
                     sampled_example_ce_sum += example_ce
+                    sampled_example_accuracy_sum += example_accuracy
                     sampled_example_count += 1
+                    schedule_reweighted_weight = 0.0
+                    if schedule_fn is not None:
+                        expected_mask_ratio = float(schedule_fn(eval_t[example_idx:example_idx + 1], T).item())
+                        if expected_mask_ratio > 0.0:
+                            schedule_reweighted_weight = 1.0 / expected_mask_ratio
+                            schedule_reweighted_nll_sum += example_nll_sum * schedule_reweighted_weight
+                            schedule_reweighted_masked_tokens += example_masked_tokens * schedule_reweighted_weight
+                            schedule_reweighted_correct += example_correct * schedule_reweighted_weight
                     sampled_example_metrics.append(
                         {
                             "batch_index": batch_idx,
@@ -881,7 +1022,8 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                             "avg_cross_entropy": example_ce,
                             "pseudo_perplexity": _safe_exp(example_ce),
                             "bits_per_masked_token": example_ce / math.log(2.0),
-                            "masked_token_accuracy": example_correct / example_masked_tokens,
+                            "masked_token_accuracy": example_accuracy,
+                            "schedule_reweighted_weight": schedule_reweighted_weight,
                         }
                     )
             else:
@@ -952,6 +1094,13 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             )
 
         timestep_uniform_avg_ce = sampled_example_ce_sum / sampled_example_count if sampled_example_count else float("nan")
+        timestep_uniform_masked_token_accuracy = sampled_example_accuracy_sum / sampled_example_count if sampled_example_count else float("nan")
+        if schedule_reweighted_masked_tokens > 0.0:
+            schedule_reweighted_avg_ce = schedule_reweighted_nll_sum / schedule_reweighted_masked_tokens
+            schedule_reweighted_masked_token_accuracy = schedule_reweighted_correct / schedule_reweighted_masked_tokens
+        else:
+            schedule_reweighted_avg_ce = float("nan")
+            schedule_reweighted_masked_token_accuracy = float("nan")
         if grid_batch_metrics:
             grid_uniform_avg_ce = sum(float(row["avg_cross_entropy"]) for row in grid_batch_metrics) / len(grid_batch_metrics)
             grid_uniform_masked_token_accuracy = sum(float(row["masked_token_accuracy"]) for row in grid_batch_metrics) / len(grid_batch_metrics)
@@ -970,6 +1119,11 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             "timestep_uniform_avg_cross_entropy": timestep_uniform_avg_ce,
             "timestep_uniform_pseudo_perplexity": _safe_exp(timestep_uniform_avg_ce),
             "timestep_uniform_bits_per_masked_token": timestep_uniform_avg_ce / math.log(2.0) if not math.isnan(timestep_uniform_avg_ce) else float("nan"),
+            "timestep_uniform_masked_token_accuracy": timestep_uniform_masked_token_accuracy,
+            "schedule_reweighted_avg_cross_entropy": schedule_reweighted_avg_ce,
+            "schedule_reweighted_pseudo_perplexity": _safe_exp(schedule_reweighted_avg_ce),
+            "schedule_reweighted_bits_per_masked_token": schedule_reweighted_avg_ce / math.log(2.0) if not math.isnan(schedule_reweighted_avg_ce) else float("nan"),
+            "schedule_reweighted_masked_token_accuracy": schedule_reweighted_masked_token_accuracy,
             "grid_uniform_avg_cross_entropy": grid_uniform_avg_ce,
             "grid_uniform_pseudo_perplexity": _safe_exp(grid_uniform_avg_ce),
             "grid_uniform_bits_per_masked_token": grid_uniform_avg_ce / math.log(2.0) if not math.isnan(grid_uniform_avg_ce) else float("nan"),
@@ -991,6 +1145,12 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 n_samples=bootstrap_samples,
                 seed=int(eval_plan.get("seed", 0)),
             ),
+            "schedule_reweighted_confidence_intervals": _bootstrap_reweighted_metric_interval(
+                sampled_example_metrics,
+                weight_key="schedule_reweighted_weight",
+                n_samples=bootstrap_samples,
+                seed=int(eval_plan.get("seed", 0)),
+            ),
             "grid_uniform_confidence_intervals": _bootstrap_grid_uniform_metric_interval(
                 grid_batch_metrics,
                 n_samples=bootstrap_samples,
@@ -1005,6 +1165,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
                 "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
                 "Timestep-uniform CE averages per-example masked-token CE over uniformly sampled timesteps, making schedule comparisons less sensitive to different mask-count profiles.",
+                "Schedule-reweighted CE applies inverse expected mask-ratio weights to sampled masked tokens, estimating a uniform-over-mask-eligible-token-and-timestep denoising objective directly from sampled batches.",
                 "Grid-uniform CE averages batch-level denoising CE over a fixed cached timestep grid, giving an explicit schedule-agnostic comparison surface.",
                 "Timestep-macro CE averages token-weighted per-timestep denoising CE equally over the explicit diagnostic grid, making each denoising stage contribute the same top-level weight.",
                 "Timestep-AUC CE integrates token-weighted per-timestep CE over normalized timestep fraction with trapezoidal weighting, so irregular diagnostic grids do not silently over-weight dense regions.",
@@ -1025,6 +1186,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         "paired_noise": True,
         "paired_batches": True,
         "sampled_timestep_distribution": "uniform_integer_1_to_eval_plan_T_then_remapped_by_fraction_per_model",
+        "schedule_reweighted_aggregation": "inverse_expected_mask_ratio_weighting_over_sampled_masked_tokens",
         "grid_uniform_aggregation": "mean_over_cached_batch_timestep_records",
         "timestep_macro_aggregation": "mean_over_token_weighted_per_timestep_metrics_on_cached_grid",
         "timestep_auc_aggregation": "normalized_trapezoid_integral_over_token_weighted_per_timestep_metrics_on_cached_grid",
@@ -1152,7 +1314,7 @@ def compare_schedule_checkpoints(
                 "Both checkpoints are evaluated on the same cached batches.",
                 "Both schedules reuse the same underlying uniform random matrices, so differences come from the schedule mapping and the model, not fresh mask draws.",
                 "If diffusion_steps differ, shared eval-plan timesteps are remapped by normalized timestep fraction before each model is evaluated.",
-                "The comparison reports both sampled-timestep and fixed-grid-uniform aggregates.",
+                "The comparison reports sampled-token, schedule-reweighted sampled, and fixed-grid-uniform aggregates.",
             ],
         },
         "models": models,
@@ -1169,6 +1331,11 @@ def compare_schedule_checkpoints(
             "masked_token_accuracy": models[1]["masked_token_accuracy"] - models[0]["masked_token_accuracy"],
             "timestep_uniform_pseudo_perplexity": models[1]["timestep_uniform_pseudo_perplexity"] - models[0]["timestep_uniform_pseudo_perplexity"],
             "timestep_uniform_avg_cross_entropy": models[1]["timestep_uniform_avg_cross_entropy"] - models[0]["timestep_uniform_avg_cross_entropy"],
+            "timestep_uniform_masked_token_accuracy": models[1]["timestep_uniform_masked_token_accuracy"] - models[0]["timestep_uniform_masked_token_accuracy"],
+            "schedule_reweighted_pseudo_perplexity": models[1]["schedule_reweighted_pseudo_perplexity"] - models[0]["schedule_reweighted_pseudo_perplexity"],
+            "schedule_reweighted_avg_cross_entropy": models[1]["schedule_reweighted_avg_cross_entropy"] - models[0]["schedule_reweighted_avg_cross_entropy"],
+            "schedule_reweighted_bits_per_masked_token": models[1]["schedule_reweighted_bits_per_masked_token"] - models[0]["schedule_reweighted_bits_per_masked_token"],
+            "schedule_reweighted_masked_token_accuracy": models[1]["schedule_reweighted_masked_token_accuracy"] - models[0]["schedule_reweighted_masked_token_accuracy"],
             "grid_uniform_pseudo_perplexity": models[1]["grid_uniform_pseudo_perplexity"] - models[0]["grid_uniform_pseudo_perplexity"],
             "grid_uniform_avg_cross_entropy": models[1]["grid_uniform_avg_cross_entropy"] - models[0]["grid_uniform_avg_cross_entropy"],
             "grid_uniform_masked_token_accuracy": models[1]["grid_uniform_masked_token_accuracy"] - models[0]["grid_uniform_masked_token_accuracy"],
@@ -1187,6 +1354,10 @@ def compare_schedule_checkpoints(
             "masked_token_accuracy": "cosine_schedule" if models[0]["masked_token_accuracy"] >= models[1]["masked_token_accuracy"] else "linear_schedule_baseline",
             "timestep_uniform_pseudo_perplexity": "cosine_schedule" if models[0]["timestep_uniform_pseudo_perplexity"] <= models[1]["timestep_uniform_pseudo_perplexity"] else "linear_schedule_baseline",
             "timestep_uniform_avg_cross_entropy": "cosine_schedule" if models[0]["timestep_uniform_avg_cross_entropy"] <= models[1]["timestep_uniform_avg_cross_entropy"] else "linear_schedule_baseline",
+            "timestep_uniform_masked_token_accuracy": "cosine_schedule" if models[0]["timestep_uniform_masked_token_accuracy"] >= models[1]["timestep_uniform_masked_token_accuracy"] else "linear_schedule_baseline",
+            "schedule_reweighted_pseudo_perplexity": "cosine_schedule" if models[0]["schedule_reweighted_pseudo_perplexity"] <= models[1]["schedule_reweighted_pseudo_perplexity"] else "linear_schedule_baseline",
+            "schedule_reweighted_avg_cross_entropy": "cosine_schedule" if models[0]["schedule_reweighted_avg_cross_entropy"] <= models[1]["schedule_reweighted_avg_cross_entropy"] else "linear_schedule_baseline",
+            "schedule_reweighted_masked_token_accuracy": "cosine_schedule" if models[0]["schedule_reweighted_masked_token_accuracy"] >= models[1]["schedule_reweighted_masked_token_accuracy"] else "linear_schedule_baseline",
             "grid_uniform_pseudo_perplexity": "cosine_schedule" if models[0]["grid_uniform_pseudo_perplexity"] <= models[1]["grid_uniform_pseudo_perplexity"] else "linear_schedule_baseline",
             "grid_uniform_avg_cross_entropy": "cosine_schedule" if models[0]["grid_uniform_avg_cross_entropy"] <= models[1]["grid_uniform_avg_cross_entropy"] else "linear_schedule_baseline",
             "grid_uniform_masked_token_accuracy": "cosine_schedule" if models[0]["grid_uniform_masked_token_accuracy"] >= models[1]["grid_uniform_masked_token_accuracy"] else "linear_schedule_baseline",
