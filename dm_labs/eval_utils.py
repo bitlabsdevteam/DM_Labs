@@ -227,6 +227,64 @@ def _metric_percentiles(samples: Sequence[float]) -> Dict[str, float]:
     }
 
 
+def _bootstrap_timestep_metric_interval(
+    timestep_metrics: Sequence[Dict[str, float]],
+    *,
+    n_samples: int = 500,
+    seed: int = 0,
+) -> Dict[str, object]:
+    if not timestep_metrics:
+        return {
+            "method": "bootstrap_over_timestep_metrics",
+            "n_timesteps": 0,
+            "replicates": 0,
+            "timestep_macro_avg_cross_entropy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_macro_pseudo_perplexity": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_macro_bits_per_masked_token": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_macro_masked_token_accuracy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_auc_avg_cross_entropy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_auc_pseudo_perplexity": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_auc_bits_per_masked_token": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_auc_masked_token_accuracy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+        }
+
+    rng = torch.Generator(device="cpu")
+    rng.manual_seed(seed)
+    n_timesteps = len(timestep_metrics)
+    macro_ce_samples: List[float] = []
+    macro_acc_samples: List[float] = []
+    auc_ce_samples: List[float] = []
+    auc_acc_samples: List[float] = []
+
+    for _ in range(n_samples):
+        indices = torch.randint(0, n_timesteps, (n_timesteps,), generator=rng)
+        sampled = [dict(timestep_metrics[idx]) for idx in indices.tolist()]
+        sampled.sort(key=lambda row: (float(row.get("timestep_fraction", float("nan"))), int(row.get("source_plan_timestep", row.get("timestep", 0)))))
+        for rank, row in enumerate(sampled):
+            row["timestep_fraction"] = float(rank) / float(max(1, n_timesteps - 1)) if n_timesteps > 1 else float(row.get("timestep_fraction", 1.0))
+
+        macro_metrics = _compute_timestep_macro_metrics(sampled)
+        auc_metrics = _compute_timestep_auc_metrics(sampled)
+        macro_ce_samples.append(float(macro_metrics["timestep_macro_avg_cross_entropy"]))
+        macro_acc_samples.append(float(macro_metrics["timestep_macro_masked_token_accuracy"]))
+        auc_ce_samples.append(float(auc_metrics["timestep_auc_avg_cross_entropy"]))
+        auc_acc_samples.append(float(auc_metrics["timestep_auc_masked_token_accuracy"]))
+
+    return {
+        "method": "bootstrap_over_timestep_metrics",
+        "n_timesteps": n_timesteps,
+        "replicates": n_samples,
+        "timestep_macro_avg_cross_entropy": _metric_percentiles(macro_ce_samples),
+        "timestep_macro_pseudo_perplexity": _metric_percentiles([_safe_exp(v) for v in macro_ce_samples]),
+        "timestep_macro_bits_per_masked_token": _metric_percentiles([v / math.log(2.0) for v in macro_ce_samples]),
+        "timestep_macro_masked_token_accuracy": _metric_percentiles(macro_acc_samples),
+        "timestep_auc_avg_cross_entropy": _metric_percentiles(auc_ce_samples),
+        "timestep_auc_pseudo_perplexity": _metric_percentiles([_safe_exp(v) for v in auc_ce_samples]),
+        "timestep_auc_bits_per_masked_token": _metric_percentiles([v / math.log(2.0) for v in auc_ce_samples]),
+        "timestep_auc_masked_token_accuracy": _metric_percentiles(auc_acc_samples),
+    }
+
+
 def _compute_timestep_macro_metrics(timestep_metrics: Sequence[Dict[str, float]]) -> Dict[str, float]:
     if not timestep_metrics:
         return {
@@ -379,6 +437,10 @@ def _bootstrap_paired_comparison_interval(
         "timestep_macro_pseudo_perplexity": [],
         "timestep_macro_bits_per_masked_token": [],
         "timestep_macro_masked_token_accuracy": [],
+        "timestep_auc_avg_cross_entropy": [],
+        "timestep_auc_pseudo_perplexity": [],
+        "timestep_auc_bits_per_masked_token": [],
+        "timestep_auc_masked_token_accuracy": [],
     }
 
     for _ in range(n_samples):
@@ -461,32 +523,51 @@ def _bootstrap_paired_comparison_interval(
         if shared_timestep_keys:
             n_timesteps = len(shared_timestep_keys)
             timestep_indices = torch.randint(0, n_timesteps, (n_timesteps,), generator=rng)
-            cosine_macro_ce = []
-            linear_macro_ce = []
-            cosine_macro_acc = []
-            linear_macro_acc = []
-            for idx in timestep_indices.tolist():
+            cosine_sampled_timestep_metrics = []
+            linear_sampled_timestep_metrics = []
+            for rank, idx in enumerate(timestep_indices.tolist()):
                 timestep = shared_timestep_keys[idx]
-                cosine_rec = cosine_timestep_by_step[timestep]
-                linear_rec = linear_timestep_by_step[timestep]
-                cosine_macro_ce.append(float(cosine_rec["avg_cross_entropy"]))
-                linear_macro_ce.append(float(linear_rec["avg_cross_entropy"]))
-                cosine_macro_acc.append(float(cosine_rec["masked_token_accuracy"]))
-                linear_macro_acc.append(float(linear_rec["masked_token_accuracy"]))
-            if cosine_macro_ce and linear_macro_ce:
-                cosine_uniform_ce = sum(cosine_macro_ce) / len(cosine_macro_ce)
-                linear_uniform_ce = sum(linear_macro_ce) / len(linear_macro_ce)
-                timestep_macro_delta_samples["timestep_macro_avg_cross_entropy"].append(linear_uniform_ce - cosine_uniform_ce)
-                timestep_macro_delta_samples["timestep_macro_pseudo_perplexity"].append(_safe_exp(linear_uniform_ce) - _safe_exp(cosine_uniform_ce))
-                timestep_macro_delta_samples["timestep_macro_bits_per_masked_token"].append((linear_uniform_ce - cosine_uniform_ce) / math.log(2.0))
-                timestep_macro_delta_samples["timestep_macro_masked_token_accuracy"].append(
-                    (sum(linear_macro_acc) / len(linear_macro_acc)) - (sum(cosine_macro_acc) / len(cosine_macro_acc))
-                )
+                cosine_rec = dict(cosine_timestep_by_step[timestep])
+                linear_rec = dict(linear_timestep_by_step[timestep])
+                bootstrap_fraction = float(rank) / float(max(1, n_timesteps - 1)) if n_timesteps > 1 else float(cosine_rec.get("timestep_fraction", 1.0))
+                cosine_rec["timestep_fraction"] = bootstrap_fraction
+                linear_rec["timestep_fraction"] = bootstrap_fraction
+                cosine_sampled_timestep_metrics.append(cosine_rec)
+                linear_sampled_timestep_metrics.append(linear_rec)
+
+            cosine_macro_metrics = _compute_timestep_macro_metrics(cosine_sampled_timestep_metrics)
+            linear_macro_metrics = _compute_timestep_macro_metrics(linear_sampled_timestep_metrics)
+            cosine_auc_metrics = _compute_timestep_auc_metrics(cosine_sampled_timestep_metrics)
+            linear_auc_metrics = _compute_timestep_auc_metrics(linear_sampled_timestep_metrics)
+            timestep_macro_delta_samples["timestep_macro_avg_cross_entropy"].append(
+                float(linear_macro_metrics["timestep_macro_avg_cross_entropy"]) - float(cosine_macro_metrics["timestep_macro_avg_cross_entropy"])
+            )
+            timestep_macro_delta_samples["timestep_macro_pseudo_perplexity"].append(
+                float(linear_macro_metrics["timestep_macro_pseudo_perplexity"]) - float(cosine_macro_metrics["timestep_macro_pseudo_perplexity"])
+            )
+            timestep_macro_delta_samples["timestep_macro_bits_per_masked_token"].append(
+                float(linear_macro_metrics["timestep_macro_bits_per_masked_token"]) - float(cosine_macro_metrics["timestep_macro_bits_per_masked_token"])
+            )
+            timestep_macro_delta_samples["timestep_macro_masked_token_accuracy"].append(
+                float(linear_macro_metrics["timestep_macro_masked_token_accuracy"]) - float(cosine_macro_metrics["timestep_macro_masked_token_accuracy"])
+            )
+            timestep_macro_delta_samples["timestep_auc_avg_cross_entropy"].append(
+                float(linear_auc_metrics["timestep_auc_avg_cross_entropy"]) - float(cosine_auc_metrics["timestep_auc_avg_cross_entropy"])
+            )
+            timestep_macro_delta_samples["timestep_auc_pseudo_perplexity"].append(
+                float(linear_auc_metrics["timestep_auc_pseudo_perplexity"]) - float(cosine_auc_metrics["timestep_auc_pseudo_perplexity"])
+            )
+            timestep_macro_delta_samples["timestep_auc_bits_per_masked_token"].append(
+                float(linear_auc_metrics["timestep_auc_bits_per_masked_token"]) - float(cosine_auc_metrics["timestep_auc_bits_per_masked_token"])
+            )
+            timestep_macro_delta_samples["timestep_auc_masked_token_accuracy"].append(
+                float(linear_auc_metrics["timestep_auc_masked_token_accuracy"]) - float(cosine_auc_metrics["timestep_auc_masked_token_accuracy"])
+            )
 
     def _with_win_probability(metric_name: str, values: Sequence[float]) -> Dict[str, float]:
         if not values:
             return {**_metric_percentiles(values), "probability_linear_better": float("nan")}
-        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy", "grid_uniform_masked_token_accuracy", "timestep_macro_masked_token_accuracy"}
+        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy", "grid_uniform_masked_token_accuracy", "timestep_macro_masked_token_accuracy", "timestep_auc_masked_token_accuracy"}
         wins = sum(v > 0.0 for v in values) if higher_is_better else sum(v < 0.0 for v in values)
         return {**_metric_percentiles(values), "probability_linear_better": float(wins / len(values))}
 
@@ -683,6 +764,7 @@ def _empty_eval_result(n_batches: int, seed: int, excluded_token_ids: Optional[S
         "excluded_token_ids": _normalize_excluded_token_ids(excluded_token_ids),
         "confidence_intervals": _bootstrap_metric_interval([], n_samples=0, seed=seed),
         "grid_uniform_confidence_intervals": _bootstrap_grid_uniform_metric_interval([], n_samples=0, seed=seed),
+        "timestep_confidence_intervals": _bootstrap_timestep_metric_interval([], n_samples=0, seed=seed),
         "notes": [
             "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
             "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
@@ -914,6 +996,11 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 n_samples=bootstrap_samples,
                 seed=int(eval_plan.get("seed", 0)),
             ),
+            "timestep_confidence_intervals": _bootstrap_timestep_metric_interval(
+                timestep_metrics,
+                n_samples=bootstrap_samples,
+                seed=int(eval_plan.get("seed", 0)),
+            ),
             "notes": [
                 "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
                 "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
@@ -923,6 +1010,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 "Timestep-AUC CE integrates token-weighted per-timestep CE over normalized timestep fraction with trapezoidal weighting, so irregular diagnostic grids do not silently over-weight dense regions.",
                 "Confidence intervals are computed by bootstrapping over sampled evaluation batches from the shared cached plan.",
                 "Grid-uniform confidence intervals are computed by bootstrapping over cached batch-timestep diagnostic records.",
+                "Timestep-macro and timestep-AUC confidence intervals are computed by bootstrapping over cached timestep diagnostics on the shared grid.",
                 "Timestep diagnostics are evaluated on a shared cached batch/noise plan so schedule comparisons are paired and reproducible.",
             ],
         }

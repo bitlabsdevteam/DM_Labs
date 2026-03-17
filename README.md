@@ -29,7 +29,8 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - cached shared-batch/shared-noise evaluation plans for reproducible comparisons
   - paired cosine-vs-linear checkpoint comparison using the same underlying corruption draws
   - paired bootstrap confidence intervals for linear-vs-cosine metric deltas on the shared eval plan
-  - paired timestep-macro bootstrap intervals over the shared diagnostic grid, so equal-weight-over-timestep comparisons carry uncertainty too
+  - timestep-grid bootstrap confidence intervals for timestep-macro and timestep-AUC denoising aggregates in single-model eval artifacts
+  - paired timestep-macro and timestep-AUC bootstrap intervals over the shared diagnostic grid, so equal-weight-over-timestep and trajectory-integral comparisons carry uncertainty too
   - per-timestep delta reporting for linear-vs-cosine comparisons
 - `dm_labs/hf_utils.py`
   - reusable Hugging Face model-card + upload helpers
@@ -70,7 +71,8 @@ Current protocol improvements in the repo:
 - when checkpoints use different `diffusion_steps`, remap the shared plan by **normalized timestep fraction** so comparisons stay corruption-matched instead of integer-step-mismatched
 - export **per-timestep linear-minus-cosine deltas**, including mask-fraction deltas, for tighter schedule analysis
 - attach **paired bootstrap delta intervals** so schedule winners are reported with uncertainty, not just point estimates
-- attach **paired timestep-macro bootstrap intervals** so equal-weight-over-timestep schedule claims are uncertainty-aware too
+- attach **timestep-grid bootstrap intervals** for both **timestep-macro** and **timestep-AUC** denoising summaries in single-model eval artifacts
+- attach **paired timestep-macro and timestep-AUC bootstrap intervals** so equal-weight-over-timestep and trajectory-level schedule claims are uncertainty-aware too
 - surface a **normalized timestep-fraction AUC** view so schedule comparisons can summarize the denoising trajectory without depending on equal timestep spacing
 - expose a **fixed-grid shared-timestep aggregate** plus paired uncertainty so cosine-vs-linear claims can be checked on an explicit common denoising surface
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts

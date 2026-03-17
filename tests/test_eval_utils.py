@@ -101,6 +101,10 @@ class EvalPlanRemapTests(unittest.TestCase):
         self.assertAlmostEqual(result["timestep_auc_masked_token_accuracy"], 0.125, places=6)
         self.assertAlmostEqual(result["timestep_auc_fraction_span"], 0.8, places=6)
         self.assertEqual(result["timestep_auc_timestep_count"], 3)
+        timestep_ci = result["timestep_confidence_intervals"]
+        self.assertEqual(timestep_ci["n_timesteps"], 3)
+        self.assertIn("timestep_macro_pseudo_perplexity", timestep_ci)
+        self.assertIn("timestep_auc_pseudo_perplexity", timestep_ci)
 
 
 class ScheduleComparisonRemapTests(unittest.TestCase):
@@ -155,6 +159,9 @@ class ScheduleComparisonRemapTests(unittest.TestCase):
         self.assertEqual([row["linear_timestep"] for row in deltas], [10, 20])
         self.assertIn("timestep_auc_pseudo_perplexity", comparison["delta"])
         self.assertIn("timestep_auc_pseudo_perplexity", comparison["winner"])
+        delta_ci = comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"]
+        self.assertIn("timestep_auc_pseudo_perplexity", delta_ci)
+        self.assertIn("timestep_auc_masked_token_accuracy", delta_ci)
 
 
 if __name__ == "__main__":
