@@ -1314,7 +1314,7 @@ def compare_schedule_checkpoints(
                 "Both checkpoints are evaluated on the same cached batches.",
                 "Both schedules reuse the same underlying uniform random matrices, so differences come from the schedule mapping and the model, not fresh mask draws.",
                 "If diffusion_steps differ, shared eval-plan timesteps are remapped by normalized timestep fraction before each model is evaluated.",
-                "The comparison reports sampled-token, schedule-reweighted sampled, and fixed-grid-uniform aggregates.",
+                "The comparison reports sampled-token, timestep-uniform sampled, schedule-reweighted sampled, fixed-grid-uniform, fixed-grid timestep-macro, and fixed-grid timestep-AUC aggregates.",
             ],
         },
         "models": models,

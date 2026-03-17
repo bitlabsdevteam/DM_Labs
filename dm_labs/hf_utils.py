@@ -3,8 +3,6 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from huggingface_hub import create_repo, login, upload_folder
-
 
 def write_eval_summary(local_artifact_dir: str, eval_summary: Optional[dict] = None) -> Optional[str]:
     if not eval_summary:
@@ -45,7 +43,8 @@ def ensure_hf_model_card(
             "| view | avg_cross_entropy | pseudo_perplexity | bits_per_masked_token | masked_token_accuracy |\n"
             "| --- | ---: | ---: | ---: | ---: |\n"
             f"| token_weighted_sampled | {eval_summary.get('avg_cross_entropy')} | {eval_summary.get('pseudo_perplexity')} | {eval_summary.get('bits_per_masked_token')} | {eval_summary.get('masked_token_accuracy')} |\n"
-            f"| timestep_uniform_sampled | {eval_summary.get('timestep_uniform_avg_cross_entropy')} | {eval_summary.get('timestep_uniform_pseudo_perplexity')} | {eval_summary.get('timestep_uniform_bits_per_masked_token')} | n/a |\n"
+            f"| timestep_uniform_sampled | {eval_summary.get('timestep_uniform_avg_cross_entropy')} | {eval_summary.get('timestep_uniform_pseudo_perplexity')} | {eval_summary.get('timestep_uniform_bits_per_masked_token')} | {eval_summary.get('timestep_uniform_masked_token_accuracy')} |\n"
+            f"| schedule_reweighted_sampled | {eval_summary.get('schedule_reweighted_avg_cross_entropy')} | {eval_summary.get('schedule_reweighted_pseudo_perplexity')} | {eval_summary.get('schedule_reweighted_bits_per_masked_token')} | {eval_summary.get('schedule_reweighted_masked_token_accuracy')} |\n"
             f"| fixed_grid_batch_uniform | {eval_summary.get('grid_uniform_avg_cross_entropy')} | {eval_summary.get('grid_uniform_pseudo_perplexity')} | {eval_summary.get('grid_uniform_bits_per_masked_token')} | {eval_summary.get('grid_uniform_masked_token_accuracy')} |\n"
             f"| fixed_grid_timestep_macro | {eval_summary.get('timestep_macro_avg_cross_entropy')} | {eval_summary.get('timestep_macro_pseudo_perplexity')} | {eval_summary.get('timestep_macro_bits_per_masked_token')} | {eval_summary.get('timestep_macro_masked_token_accuracy')} |\n"
             f"| fixed_grid_timestep_auc | {eval_summary.get('timestep_auc_avg_cross_entropy')} | {eval_summary.get('timestep_auc_pseudo_perplexity')} | {eval_summary.get('timestep_auc_bits_per_masked_token')} | {eval_summary.get('timestep_auc_masked_token_accuracy')} |\n\n"
@@ -99,6 +98,7 @@ def ensure_hf_model_card(
                 f"- paired_noise: {protocol.get('paired_noise')}\n"
                 f"- paired_batches: {protocol.get('paired_batches')}\n"
                 f"- sampled_timestep_distribution: {protocol.get('sampled_timestep_distribution')}\n"
+                f"- schedule_reweighted_aggregation: {protocol.get('schedule_reweighted_aggregation')}\n"
                 f"- grid_uniform_aggregation: {protocol.get('grid_uniform_aggregation')}\n"
                 f"- timestep_macro_aggregation: {protocol.get('timestep_macro_aggregation')}\n"
                 f"- timestep_auc_aggregation: {protocol.get('timestep_auc_aggregation')}\n"
@@ -127,10 +127,13 @@ def ensure_hf_model_card(
             "| --- | ---: | --- | --- |\n"
             f"| sampled_pseudo_perplexity | {delta.get('pseudo_perplexity')} | {winner.get('pseudo_perplexity')} | bootstrap_p05_p95=[{ppx_ci.get('p05')}, {ppx_ci.get('p95')}], p_linear_better={ppx_ci.get('probability_linear_better')} |\n"
             f"| timestep_uniform_pseudo_perplexity | {delta.get('timestep_uniform_pseudo_perplexity')} | {winner.get('timestep_uniform_pseudo_perplexity')} | bootstrap_p05_p95=[{uniform_ppx_ci.get('p05')}, {uniform_ppx_ci.get('p95')}], p_linear_better={uniform_ppx_ci.get('probability_linear_better')} |\n"
+            f"| schedule_reweighted_pseudo_perplexity | {delta.get('schedule_reweighted_pseudo_perplexity')} | {winner.get('schedule_reweighted_pseudo_perplexity')} | bootstrap_p05_p95=[{reweighted_ppx_ci.get('p05')}, {reweighted_ppx_ci.get('p95')}], p_linear_better={reweighted_ppx_ci.get('probability_linear_better')} |\n"
             f"| grid_uniform_pseudo_perplexity | {delta.get('grid_uniform_pseudo_perplexity')} | {winner.get('grid_uniform_pseudo_perplexity')} | bootstrap_p05_p95=[{grid_ppx_ci.get('p05')}, {grid_ppx_ci.get('p95')}], p_linear_better={grid_ppx_ci.get('probability_linear_better')} |\n"
             f"| timestep_macro_pseudo_perplexity | {delta.get('timestep_macro_pseudo_perplexity')} | {winner.get('timestep_macro_pseudo_perplexity')} | bootstrap_p05_p95=[{macro_ppx_ci.get('p05')}, {macro_ppx_ci.get('p95')}], p_linear_better={macro_ppx_ci.get('probability_linear_better')} |\n"
             f"| timestep_auc_pseudo_perplexity | {delta.get('timestep_auc_pseudo_perplexity')} | {winner.get('timestep_auc_pseudo_perplexity')} | bootstrap_p05_p95=[{auc_ppx_ci.get('p05')}, {auc_ppx_ci.get('p95')}], p_linear_better={auc_ppx_ci.get('probability_linear_better')} |\n"
             f"| sampled_accuracy | {delta.get('masked_token_accuracy')} | {winner.get('masked_token_accuracy')} | bootstrap_p05_p95=[{acc_ci.get('p05')}, {acc_ci.get('p95')}], p_linear_better={acc_ci.get('probability_linear_better')} |\n"
+            f"| timestep_uniform_accuracy | {delta.get('timestep_uniform_masked_token_accuracy')} | {winner.get('timestep_uniform_masked_token_accuracy')} | bootstrap_p05_p95=[{uniform_acc_ci.get('p05')}, {uniform_acc_ci.get('p95')}], p_linear_better={uniform_acc_ci.get('probability_linear_better')} |\n"
+            f"| schedule_reweighted_accuracy | {delta.get('schedule_reweighted_masked_token_accuracy')} | {winner.get('schedule_reweighted_masked_token_accuracy')} | bootstrap_p05_p95=[{reweighted_acc_ci.get('p05')}, {reweighted_acc_ci.get('p95')}], p_linear_better={reweighted_acc_ci.get('probability_linear_better')} |\n"
             f"| grid_uniform_accuracy | {delta.get('grid_uniform_masked_token_accuracy')} | {winner.get('grid_uniform_masked_token_accuracy')} | bootstrap_p05_p95=[{grid_acc_ci.get('p05')}, {grid_acc_ci.get('p95')}], p_linear_better={grid_acc_ci.get('probability_linear_better')} |\n"
             f"| timestep_macro_accuracy | {delta.get('timestep_macro_masked_token_accuracy')} | {winner.get('timestep_macro_masked_token_accuracy')} | bootstrap_p05_p95=[{macro_acc_ci.get('p05')}, {macro_acc_ci.get('p95')}], p_linear_better={macro_acc_ci.get('probability_linear_better')} |\n"
             f"| timestep_auc_accuracy | {delta.get('timestep_auc_masked_token_accuracy')} | {winner.get('timestep_auc_masked_token_accuracy')} | bootstrap_p05_p95=[{auc_acc_ci.get('p05')}, {auc_acc_ci.get('p95')}], p_linear_better={auc_acc_ci.get('probability_linear_better')} |\n\n"
@@ -209,6 +212,9 @@ def upload_checkpoint_to_hub(
         comparison_summary=comparison_summary,
         overwrite=overwrite_model_card,
     )
+
+    from huggingface_hub import create_repo, login, upload_folder
+
     login(token=hf_token)
     create_repo(repo_id=hf_repo_id, repo_type="model", private=private, exist_ok=True)
     upload_folder(

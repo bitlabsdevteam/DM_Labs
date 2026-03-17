@@ -36,6 +36,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
 - `dm_labs/hf_utils.py`
   - reusable Hugging Face model-card + upload helpers
   - persists `eval_summary.json` and `schedule_comparison.json` alongside uploaded artifacts
+  - surfaces timestep-uniform, schedule-reweighted, grid-uniform, timestep-macro, and timestep-AUC evaluation views in exported model cards
 
 ## Project Focus
 
