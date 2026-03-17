@@ -22,9 +22,9 @@ EVAL_VIEW_SPECS = [
         "pseudo_perplexity_key": "timestep_uniform_pseudo_perplexity",
         "bits_key": "timestep_uniform_bits_per_masked_token",
         "accuracy_key": "timestep_uniform_masked_token_accuracy",
-        "ci_container_key": None,
-        "ci_metric_key": None,
-        "ci_accuracy_key": None,
+        "ci_container_key": "timestep_uniform_confidence_intervals",
+        "ci_metric_key": "timestep_uniform_pseudo_perplexity",
+        "ci_accuracy_key": "timestep_uniform_masked_token_accuracy",
         "aggregation": "uniform mean over sampled per-example timesteps",
     },
     {

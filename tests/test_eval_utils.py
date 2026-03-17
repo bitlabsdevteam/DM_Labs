@@ -108,6 +108,10 @@ class EvalPlanRemapTests(unittest.TestCase):
         self.assertAlmostEqual(result["schedule_reweighted_pseudo_perplexity"], 8.0, places=6)
         self.assertAlmostEqual(result["schedule_reweighted_masked_token_accuracy"], 0.125, places=6)
         self.assertAlmostEqual(result["timestep_uniform_masked_token_accuracy"], 0.125, places=6)
+        timestep_uniform_ci = result["timestep_uniform_confidence_intervals"]
+        self.assertEqual(timestep_uniform_ci["n_examples"], 3)
+        self.assertIn("timestep_uniform_pseudo_perplexity", timestep_uniform_ci)
+        self.assertIn("timestep_uniform_masked_token_accuracy", timestep_uniform_ci)
         reweighted_ci = result["schedule_reweighted_confidence_intervals"]
         self.assertIn("schedule_reweighted_pseudo_perplexity", reweighted_ci)
         self.assertIn("schedule_reweighted_masked_token_accuracy", reweighted_ci)

@@ -127,6 +127,73 @@ def _bootstrap_metric_interval(
     }
 
 
+def _bootstrap_example_uniform_metric_interval(
+    example_records: Sequence[Dict[str, float]],
+    *,
+    n_samples: int = 500,
+    seed: int = 0,
+) -> Dict[str, object]:
+    if not example_records:
+        return {
+            "method": "bootstrap_over_example_records_uniform",
+            "n_examples": 0,
+            "replicates": 0,
+            "timestep_uniform_avg_cross_entropy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_uniform_pseudo_perplexity": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_uniform_bits_per_masked_token": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_uniform_masked_token_accuracy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+        }
+
+    rng = torch.Generator(device="cpu")
+    rng.manual_seed(seed)
+    n = len(example_records)
+    ce_samples: List[float] = []
+    acc_samples: List[float] = []
+
+    for _ in range(n_samples):
+        indices = torch.randint(0, n, (n,), generator=rng)
+        sampled_ce: List[float] = []
+        sampled_acc: List[float] = []
+        for idx in indices.tolist():
+            rec = example_records[idx]
+            sampled_ce.append(float(rec["avg_cross_entropy"]))
+            sampled_acc.append(float(rec["masked_token_accuracy"]))
+        if not sampled_ce:
+            continue
+        ce_samples.append(sum(sampled_ce) / len(sampled_ce))
+        acc_samples.append(sum(sampled_acc) / len(sampled_acc))
+
+    if not ce_samples:
+        return {
+            "method": "bootstrap_over_example_records_uniform",
+            "n_examples": n,
+            "replicates": 0,
+            "timestep_uniform_avg_cross_entropy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_uniform_pseudo_perplexity": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_uniform_bits_per_masked_token": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "timestep_uniform_masked_token_accuracy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+        }
+
+    ce_tensor = torch.tensor(ce_samples, dtype=torch.float64)
+    ce_q = torch.quantile(ce_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    ppx_tensor = torch.tensor([_safe_exp(float(v)) for v in ce_samples], dtype=torch.float64)
+    ppx_q = torch.quantile(ppx_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    bits_tensor = torch.tensor([float(v) / math.log(2.0) for v in ce_samples], dtype=torch.float64)
+    bits_q = torch.quantile(bits_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    acc_tensor = torch.tensor(acc_samples, dtype=torch.float64)
+    acc_q = torch.quantile(acc_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+
+    return {
+        "method": "bootstrap_over_example_records_uniform",
+        "n_examples": n,
+        "replicates": len(ce_samples),
+        "timestep_uniform_avg_cross_entropy": {"mean": float(ce_tensor.mean().item()), "p05": float(ce_q[0]), "p50": float(ce_q[1]), "p95": float(ce_q[2])},
+        "timestep_uniform_pseudo_perplexity": {"mean": float(ppx_tensor.mean().item()), "p05": float(ppx_q[0]), "p50": float(ppx_q[1]), "p95": float(ppx_q[2])},
+        "timestep_uniform_bits_per_masked_token": {"mean": float(bits_tensor.mean().item()), "p05": float(bits_q[0]), "p50": float(bits_q[1]), "p95": float(bits_q[2])},
+        "timestep_uniform_masked_token_accuracy": {"mean": float(acc_tensor.mean().item()), "p05": float(acc_q[0]), "p50": float(acc_q[1]), "p95": float(acc_q[2])},
+    }
+
+
 def _bootstrap_reweighted_metric_interval(
     example_records: Sequence[Dict[str, float]],
     *,
@@ -861,6 +928,7 @@ def _empty_eval_result(n_batches: int, seed: int, excluded_token_ids: Optional[S
         "schedule_reweighted_pseudo_perplexity": float("nan"),
         "schedule_reweighted_bits_per_masked_token": float("nan"),
         "schedule_reweighted_masked_token_accuracy": float("nan"),
+        "timestep_uniform_confidence_intervals": _bootstrap_example_uniform_metric_interval([], n_samples=0, seed=seed),
         "grid_uniform_avg_cross_entropy": float("nan"),
         "grid_uniform_pseudo_perplexity": float("nan"),
         "grid_uniform_bits_per_masked_token": float("nan"),
@@ -1142,6 +1210,11 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             "excluded_token_ids": _normalize_excluded_token_ids(excluded_token_ids),
             "confidence_intervals": _bootstrap_metric_interval(
                 sampled_batch_metrics,
+                n_samples=bootstrap_samples,
+                seed=int(eval_plan.get("seed", 0)),
+            ),
+            "timestep_uniform_confidence_intervals": _bootstrap_example_uniform_metric_interval(
+                sampled_example_metrics,
                 n_samples=bootstrap_samples,
                 seed=int(eval_plan.get("seed", 0)),
             ),
