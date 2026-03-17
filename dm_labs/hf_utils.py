@@ -4,6 +4,219 @@ from pathlib import Path
 from typing import Optional
 
 
+EVAL_VIEW_SPECS = [
+    {
+        "view": "token_weighted_sampled",
+        "avg_cross_entropy_key": "avg_cross_entropy",
+        "pseudo_perplexity_key": "pseudo_perplexity",
+        "bits_key": "bits_per_masked_token",
+        "accuracy_key": "masked_token_accuracy",
+        "ci_container_key": "confidence_intervals",
+        "ci_metric_key": "pseudo_perplexity",
+        "ci_accuracy_key": "masked_token_accuracy",
+        "aggregation": "token-weighted over sampled masked tokens",
+    },
+    {
+        "view": "timestep_uniform_sampled",
+        "avg_cross_entropy_key": "timestep_uniform_avg_cross_entropy",
+        "pseudo_perplexity_key": "timestep_uniform_pseudo_perplexity",
+        "bits_key": "timestep_uniform_bits_per_masked_token",
+        "accuracy_key": "timestep_uniform_masked_token_accuracy",
+        "ci_container_key": None,
+        "ci_metric_key": None,
+        "ci_accuracy_key": None,
+        "aggregation": "uniform mean over sampled per-example timesteps",
+    },
+    {
+        "view": "schedule_reweighted_sampled",
+        "avg_cross_entropy_key": "schedule_reweighted_avg_cross_entropy",
+        "pseudo_perplexity_key": "schedule_reweighted_pseudo_perplexity",
+        "bits_key": "schedule_reweighted_bits_per_masked_token",
+        "accuracy_key": "schedule_reweighted_masked_token_accuracy",
+        "ci_container_key": "schedule_reweighted_confidence_intervals",
+        "ci_metric_key": "schedule_reweighted_pseudo_perplexity",
+        "ci_accuracy_key": "schedule_reweighted_masked_token_accuracy",
+        "aggregation": "inverse-expected-mask-ratio weighting over sampled masked tokens",
+    },
+    {
+        "view": "fixed_grid_batch_uniform",
+        "avg_cross_entropy_key": "grid_uniform_avg_cross_entropy",
+        "pseudo_perplexity_key": "grid_uniform_pseudo_perplexity",
+        "bits_key": "grid_uniform_bits_per_masked_token",
+        "accuracy_key": "grid_uniform_masked_token_accuracy",
+        "ci_container_key": "grid_uniform_confidence_intervals",
+        "ci_metric_key": "grid_uniform_pseudo_perplexity",
+        "ci_accuracy_key": "grid_uniform_masked_token_accuracy",
+        "aggregation": "uniform mean over cached batch-timestep records on the fixed grid",
+    },
+    {
+        "view": "fixed_grid_timestep_macro",
+        "avg_cross_entropy_key": "timestep_macro_avg_cross_entropy",
+        "pseudo_perplexity_key": "timestep_macro_pseudo_perplexity",
+        "bits_key": "timestep_macro_bits_per_masked_token",
+        "accuracy_key": "timestep_macro_masked_token_accuracy",
+        "ci_container_key": "timestep_confidence_intervals",
+        "ci_metric_key": "timestep_macro_pseudo_perplexity",
+        "ci_accuracy_key": "timestep_macro_masked_token_accuracy",
+        "aggregation": "uniform mean over token-weighted per-timestep metrics on the fixed grid",
+    },
+    {
+        "view": "fixed_grid_timestep_auc",
+        "avg_cross_entropy_key": "timestep_auc_avg_cross_entropy",
+        "pseudo_perplexity_key": "timestep_auc_pseudo_perplexity",
+        "bits_key": "timestep_auc_bits_per_masked_token",
+        "accuracy_key": "timestep_auc_masked_token_accuracy",
+        "ci_container_key": "timestep_confidence_intervals",
+        "ci_metric_key": "timestep_auc_pseudo_perplexity",
+        "ci_accuracy_key": "timestep_auc_masked_token_accuracy",
+        "aggregation": "normalized trapezoid integral over token-weighted per-timestep metrics on the fixed grid",
+    },
+]
+
+
+COMPARISON_VIEW_SPECS = [
+    {
+        "metric_view": "sampled_pseudo_perplexity",
+        "delta_key": "pseudo_perplexity",
+        "winner_key": "pseudo_perplexity",
+        "ci_key": "pseudo_perplexity",
+        "better_direction": "lower",
+    },
+    {
+        "metric_view": "timestep_uniform_pseudo_perplexity",
+        "delta_key": "timestep_uniform_pseudo_perplexity",
+        "winner_key": "timestep_uniform_pseudo_perplexity",
+        "ci_key": "timestep_uniform_pseudo_perplexity",
+        "better_direction": "lower",
+    },
+    {
+        "metric_view": "schedule_reweighted_pseudo_perplexity",
+        "delta_key": "schedule_reweighted_pseudo_perplexity",
+        "winner_key": "schedule_reweighted_pseudo_perplexity",
+        "ci_key": "schedule_reweighted_pseudo_perplexity",
+        "better_direction": "lower",
+    },
+    {
+        "metric_view": "grid_uniform_pseudo_perplexity",
+        "delta_key": "grid_uniform_pseudo_perplexity",
+        "winner_key": "grid_uniform_pseudo_perplexity",
+        "ci_key": "grid_uniform_pseudo_perplexity",
+        "better_direction": "lower",
+    },
+    {
+        "metric_view": "timestep_macro_pseudo_perplexity",
+        "delta_key": "timestep_macro_pseudo_perplexity",
+        "winner_key": "timestep_macro_pseudo_perplexity",
+        "ci_key": "timestep_macro_pseudo_perplexity",
+        "better_direction": "lower",
+    },
+    {
+        "metric_view": "timestep_auc_pseudo_perplexity",
+        "delta_key": "timestep_auc_pseudo_perplexity",
+        "winner_key": "timestep_auc_pseudo_perplexity",
+        "ci_key": "timestep_auc_pseudo_perplexity",
+        "better_direction": "lower",
+    },
+    {
+        "metric_view": "sampled_accuracy",
+        "delta_key": "masked_token_accuracy",
+        "winner_key": "masked_token_accuracy",
+        "ci_key": "masked_token_accuracy",
+        "better_direction": "higher",
+    },
+    {
+        "metric_view": "timestep_uniform_accuracy",
+        "delta_key": "timestep_uniform_masked_token_accuracy",
+        "winner_key": "timestep_uniform_masked_token_accuracy",
+        "ci_key": "timestep_uniform_masked_token_accuracy",
+        "better_direction": "higher",
+    },
+    {
+        "metric_view": "schedule_reweighted_accuracy",
+        "delta_key": "schedule_reweighted_masked_token_accuracy",
+        "winner_key": "schedule_reweighted_masked_token_accuracy",
+        "ci_key": "schedule_reweighted_masked_token_accuracy",
+        "better_direction": "higher",
+    },
+    {
+        "metric_view": "grid_uniform_accuracy",
+        "delta_key": "grid_uniform_masked_token_accuracy",
+        "winner_key": "grid_uniform_masked_token_accuracy",
+        "ci_key": "grid_uniform_masked_token_accuracy",
+        "better_direction": "higher",
+    },
+    {
+        "metric_view": "timestep_macro_accuracy",
+        "delta_key": "timestep_macro_masked_token_accuracy",
+        "winner_key": "timestep_macro_masked_token_accuracy",
+        "ci_key": "timestep_macro_masked_token_accuracy",
+        "better_direction": "higher",
+    },
+    {
+        "metric_view": "timestep_auc_accuracy",
+        "delta_key": "timestep_auc_masked_token_accuracy",
+        "winner_key": "timestep_auc_masked_token_accuracy",
+        "ci_key": "timestep_auc_masked_token_accuracy",
+        "better_direction": "higher",
+    },
+]
+
+
+def _extract_ci(summary: Optional[dict], container_key: Optional[str], metric_key: Optional[str]) -> dict:
+    if not summary or not container_key or not metric_key:
+        return {}
+    return (summary.get(container_key) or {}).get(metric_key) or {}
+
+
+def build_eval_view_rows(eval_summary: Optional[dict] = None) -> list:
+    if not eval_summary:
+        return []
+
+    rows = []
+    for spec in EVAL_VIEW_SPECS:
+        metric_ci = _extract_ci(eval_summary, spec["ci_container_key"], spec["ci_metric_key"])
+        accuracy_ci = _extract_ci(eval_summary, spec["ci_container_key"], spec["ci_accuracy_key"])
+        rows.append(
+            {
+                "view": spec["view"],
+                "aggregation": spec["aggregation"],
+                "avg_cross_entropy": eval_summary.get(spec["avg_cross_entropy_key"]),
+                "pseudo_perplexity": eval_summary.get(spec["pseudo_perplexity_key"]),
+                "bits_per_masked_token": eval_summary.get(spec["bits_key"]),
+                "masked_token_accuracy": eval_summary.get(spec["accuracy_key"]),
+                "pseudo_perplexity_ci_p05": metric_ci.get("p05"),
+                "pseudo_perplexity_ci_p95": metric_ci.get("p95"),
+                "masked_token_accuracy_ci_p05": accuracy_ci.get("p05"),
+                "masked_token_accuracy_ci_p95": accuracy_ci.get("p95"),
+            }
+        )
+    return rows
+
+
+def build_schedule_comparison_rows(comparison_summary: Optional[dict] = None) -> list:
+    if not comparison_summary or len(comparison_summary.get("models", [])) < 2:
+        return []
+
+    delta = comparison_summary.get("delta") or {}
+    winner = comparison_summary.get("winner") or {}
+    delta_ci = ((comparison_summary.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {})
+    rows = []
+    for spec in COMPARISON_VIEW_SPECS:
+        ci = delta_ci.get(spec["ci_key"]) or {}
+        rows.append(
+            {
+                "metric_view": spec["metric_view"],
+                "better_direction": spec["better_direction"],
+                "delta_linear_minus_cosine": delta.get(spec["delta_key"]),
+                "winner": winner.get(spec["winner_key"]),
+                "bootstrap_p05": ci.get("p05"),
+                "bootstrap_p95": ci.get("p95"),
+                "probability_linear_better": ci.get("probability_linear_better"),
+            }
+        )
+    return rows
+
+
 def write_eval_summary(local_artifact_dir: str, eval_summary: Optional[dict] = None) -> Optional[str]:
     if not eval_summary:
         return None
@@ -38,53 +251,29 @@ def ensure_hf_model_card(
     protocol_block = ""
     comparison_block = ""
     if eval_summary:
-        metrics_block = (
-            "\n## Evaluation summary\n\n"
-            "| view | avg_cross_entropy | pseudo_perplexity | bits_per_masked_token | masked_token_accuracy |\n"
-            "| --- | ---: | ---: | ---: | ---: |\n"
-            f"| token_weighted_sampled | {eval_summary.get('avg_cross_entropy')} | {eval_summary.get('pseudo_perplexity')} | {eval_summary.get('bits_per_masked_token')} | {eval_summary.get('masked_token_accuracy')} |\n"
-            f"| timestep_uniform_sampled | {eval_summary.get('timestep_uniform_avg_cross_entropy')} | {eval_summary.get('timestep_uniform_pseudo_perplexity')} | {eval_summary.get('timestep_uniform_bits_per_masked_token')} | {eval_summary.get('timestep_uniform_masked_token_accuracy')} |\n"
-            f"| schedule_reweighted_sampled | {eval_summary.get('schedule_reweighted_avg_cross_entropy')} | {eval_summary.get('schedule_reweighted_pseudo_perplexity')} | {eval_summary.get('schedule_reweighted_bits_per_masked_token')} | {eval_summary.get('schedule_reweighted_masked_token_accuracy')} |\n"
-            f"| fixed_grid_batch_uniform | {eval_summary.get('grid_uniform_avg_cross_entropy')} | {eval_summary.get('grid_uniform_pseudo_perplexity')} | {eval_summary.get('grid_uniform_bits_per_masked_token')} | {eval_summary.get('grid_uniform_masked_token_accuracy')} |\n"
-            f"| fixed_grid_timestep_macro | {eval_summary.get('timestep_macro_avg_cross_entropy')} | {eval_summary.get('timestep_macro_pseudo_perplexity')} | {eval_summary.get('timestep_macro_bits_per_masked_token')} | {eval_summary.get('timestep_macro_masked_token_accuracy')} |\n"
-            f"| fixed_grid_timestep_auc | {eval_summary.get('timestep_auc_avg_cross_entropy')} | {eval_summary.get('timestep_auc_pseudo_perplexity')} | {eval_summary.get('timestep_auc_bits_per_masked_token')} | {eval_summary.get('timestep_auc_masked_token_accuracy')} |\n\n"
-            f"- metric: {eval_summary.get('metric', 'diffusion_pseudo_perplexity')}\n"
-            f"- sampled_example_count: {eval_summary.get('sampled_example_count')}\n"
-            f"- masked_tokens: {eval_summary.get('masked_tokens')}\n"
-            f"- n_batches: {eval_summary.get('n_batches')}\n"
-            f"- timestep_macro_timestep_count: {eval_summary.get('timestep_macro_timestep_count')}\n"
-            f"- timestep_auc_timestep_count: {eval_summary.get('timestep_auc_timestep_count')}\n"
-            f"- timestep_auc_fraction_span: {eval_summary.get('timestep_auc_fraction_span')}\n"
+        eval_rows = build_eval_view_rows(eval_summary)
+        metrics_lines = [
+            "\n## Evaluation summary\n",
+            "| view | aggregation | avg_cross_entropy | pseudo_perplexity | bits_per_masked_token | masked_token_accuracy | pseudo_perplexity_ci_p05 | pseudo_perplexity_ci_p95 | accuracy_ci_p05 | accuracy_ci_p95 |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+        for row in eval_rows:
+            metrics_lines.append(
+                f"| {row['view']} | {row['aggregation']} | {row['avg_cross_entropy']} | {row['pseudo_perplexity']} | {row['bits_per_masked_token']} | {row['masked_token_accuracy']} | {row['pseudo_perplexity_ci_p05']} | {row['pseudo_perplexity_ci_p95']} | {row['masked_token_accuracy_ci_p05']} | {row['masked_token_accuracy_ci_p95']} |"
+            )
+        metrics_lines.extend(
+            [
+                "",
+                f"- metric: {eval_summary.get('metric', 'diffusion_pseudo_perplexity')}",
+                f"- sampled_example_count: {eval_summary.get('sampled_example_count')}",
+                f"- masked_tokens: {eval_summary.get('masked_tokens')}",
+                f"- n_batches: {eval_summary.get('n_batches')}",
+                f"- timestep_macro_timestep_count: {eval_summary.get('timestep_macro_timestep_count')}",
+                f"- timestep_auc_timestep_count: {eval_summary.get('timestep_auc_timestep_count')}",
+                f"- timestep_auc_fraction_span: {eval_summary.get('timestep_auc_fraction_span')}",
+            ]
         )
-        ci = eval_summary.get("confidence_intervals") or {}
-        ppx_ci = ci.get("pseudo_perplexity") or {}
-        if ppx_ci:
-            metrics_block += (
-                f"- pseudo_perplexity_bootstrap_p05_p95: [{ppx_ci.get('p05')}, {ppx_ci.get('p95')}]\n"
-            )
-        reweighted_ci = eval_summary.get("schedule_reweighted_confidence_intervals") or {}
-        reweighted_ppx_ci = reweighted_ci.get("schedule_reweighted_pseudo_perplexity") or {}
-        if reweighted_ppx_ci:
-            metrics_block += (
-                f"- schedule_reweighted_pseudo_perplexity_bootstrap_p05_p95: [{reweighted_ppx_ci.get('p05')}, {reweighted_ppx_ci.get('p95')}]\n"
-            )
-        grid_ci = eval_summary.get("grid_uniform_confidence_intervals") or {}
-        grid_ppx_ci = grid_ci.get("grid_uniform_pseudo_perplexity") or {}
-        if grid_ppx_ci:
-            metrics_block += (
-                f"- grid_uniform_pseudo_perplexity_bootstrap_p05_p95: [{grid_ppx_ci.get('p05')}, {grid_ppx_ci.get('p95')}]\n"
-            )
-        timestep_ci = eval_summary.get("timestep_confidence_intervals") or {}
-        macro_ppx_ci = timestep_ci.get("timestep_macro_pseudo_perplexity") or {}
-        auc_ppx_ci = timestep_ci.get("timestep_auc_pseudo_perplexity") or {}
-        if macro_ppx_ci:
-            metrics_block += (
-                f"- timestep_macro_pseudo_perplexity_bootstrap_p05_p95: [{macro_ppx_ci.get('p05')}, {macro_ppx_ci.get('p95')}]\n"
-            )
-        if auc_ppx_ci:
-            metrics_block += (
-                f"- timestep_auc_pseudo_perplexity_bootstrap_p05_p95: [{auc_ppx_ci.get('p05')}, {auc_ppx_ci.get('p95')}]\n"
-            )
+        metrics_block = "\n".join(metrics_lines) + "\n"
         protocol = eval_summary.get("eval_protocol") or {}
         if protocol:
             protocol_block = (
@@ -105,46 +294,31 @@ def ensure_hf_model_card(
                 f"- bootstrap_samples: {protocol.get('bootstrap_samples')}\n"
             )
 
-    if comparison_summary and len(comparison_summary.get("models", [])) >= 2:
+    comparison_rows = build_schedule_comparison_rows(comparison_summary)
+    if comparison_rows:
+        comparison_lines = [
+            "\n## Schedule comparison\n",
+            "| metric_view | better_direction | delta_linear_minus_cosine | winner | bootstrap_p05 | bootstrap_p95 | probability_linear_better |",
+            "| --- | --- | ---: | --- | ---: | ---: | ---: |",
+        ]
+        for row in comparison_rows:
+            comparison_lines.append(
+                f"| {row['metric_view']} | {row['better_direction']} | {row['delta_linear_minus_cosine']} | {row['winner']} | {row['bootstrap_p05']} | {row['bootstrap_p95']} | {row['probability_linear_better']} |"
+            )
         delta = comparison_summary.get("delta") or {}
-        winner = comparison_summary.get("winner") or {}
-        delta_ci = ((comparison_summary.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {})
-        ppx_ci = delta_ci.get("pseudo_perplexity") or {}
-        uniform_ppx_ci = delta_ci.get("timestep_uniform_pseudo_perplexity") or {}
-        reweighted_ppx_ci = delta_ci.get("schedule_reweighted_pseudo_perplexity") or {}
-        grid_ppx_ci = delta_ci.get("grid_uniform_pseudo_perplexity") or {}
-        macro_ppx_ci = delta_ci.get("timestep_macro_pseudo_perplexity") or {}
-        auc_ppx_ci = delta_ci.get("timestep_auc_pseudo_perplexity") or {}
-        acc_ci = delta_ci.get("masked_token_accuracy") or {}
-        uniform_acc_ci = delta_ci.get("timestep_uniform_masked_token_accuracy") or {}
-        reweighted_acc_ci = delta_ci.get("schedule_reweighted_masked_token_accuracy") or {}
-        grid_acc_ci = delta_ci.get("grid_uniform_masked_token_accuracy") or {}
-        macro_acc_ci = delta_ci.get("timestep_macro_masked_token_accuracy") or {}
-        auc_acc_ci = delta_ci.get("timestep_auc_masked_token_accuracy") or {}
-        comparison_block = (
-            "\n## Schedule comparison\n\n"
-            "| metric_view | delta_linear_minus_cosine | winner | extra |\n"
-            "| --- | ---: | --- | --- |\n"
-            f"| sampled_pseudo_perplexity | {delta.get('pseudo_perplexity')} | {winner.get('pseudo_perplexity')} | bootstrap_p05_p95=[{ppx_ci.get('p05')}, {ppx_ci.get('p95')}], p_linear_better={ppx_ci.get('probability_linear_better')} |\n"
-            f"| timestep_uniform_pseudo_perplexity | {delta.get('timestep_uniform_pseudo_perplexity')} | {winner.get('timestep_uniform_pseudo_perplexity')} | bootstrap_p05_p95=[{uniform_ppx_ci.get('p05')}, {uniform_ppx_ci.get('p95')}], p_linear_better={uniform_ppx_ci.get('probability_linear_better')} |\n"
-            f"| schedule_reweighted_pseudo_perplexity | {delta.get('schedule_reweighted_pseudo_perplexity')} | {winner.get('schedule_reweighted_pseudo_perplexity')} | bootstrap_p05_p95=[{reweighted_ppx_ci.get('p05')}, {reweighted_ppx_ci.get('p95')}], p_linear_better={reweighted_ppx_ci.get('probability_linear_better')} |\n"
-            f"| grid_uniform_pseudo_perplexity | {delta.get('grid_uniform_pseudo_perplexity')} | {winner.get('grid_uniform_pseudo_perplexity')} | bootstrap_p05_p95=[{grid_ppx_ci.get('p05')}, {grid_ppx_ci.get('p95')}], p_linear_better={grid_ppx_ci.get('probability_linear_better')} |\n"
-            f"| timestep_macro_pseudo_perplexity | {delta.get('timestep_macro_pseudo_perplexity')} | {winner.get('timestep_macro_pseudo_perplexity')} | bootstrap_p05_p95=[{macro_ppx_ci.get('p05')}, {macro_ppx_ci.get('p95')}], p_linear_better={macro_ppx_ci.get('probability_linear_better')} |\n"
-            f"| timestep_auc_pseudo_perplexity | {delta.get('timestep_auc_pseudo_perplexity')} | {winner.get('timestep_auc_pseudo_perplexity')} | bootstrap_p05_p95=[{auc_ppx_ci.get('p05')}, {auc_ppx_ci.get('p95')}], p_linear_better={auc_ppx_ci.get('probability_linear_better')} |\n"
-            f"| sampled_accuracy | {delta.get('masked_token_accuracy')} | {winner.get('masked_token_accuracy')} | bootstrap_p05_p95=[{acc_ci.get('p05')}, {acc_ci.get('p95')}], p_linear_better={acc_ci.get('probability_linear_better')} |\n"
-            f"| timestep_uniform_accuracy | {delta.get('timestep_uniform_masked_token_accuracy')} | {winner.get('timestep_uniform_masked_token_accuracy')} | bootstrap_p05_p95=[{uniform_acc_ci.get('p05')}, {uniform_acc_ci.get('p95')}], p_linear_better={uniform_acc_ci.get('probability_linear_better')} |\n"
-            f"| schedule_reweighted_accuracy | {delta.get('schedule_reweighted_masked_token_accuracy')} | {winner.get('schedule_reweighted_masked_token_accuracy')} | bootstrap_p05_p95=[{reweighted_acc_ci.get('p05')}, {reweighted_acc_ci.get('p95')}], p_linear_better={reweighted_acc_ci.get('probability_linear_better')} |\n"
-            f"| grid_uniform_accuracy | {delta.get('grid_uniform_masked_token_accuracy')} | {winner.get('grid_uniform_masked_token_accuracy')} | bootstrap_p05_p95=[{grid_acc_ci.get('p05')}, {grid_acc_ci.get('p95')}], p_linear_better={grid_acc_ci.get('probability_linear_better')} |\n"
-            f"| timestep_macro_accuracy | {delta.get('timestep_macro_masked_token_accuracy')} | {winner.get('timestep_macro_masked_token_accuracy')} | bootstrap_p05_p95=[{macro_acc_ci.get('p05')}, {macro_acc_ci.get('p95')}], p_linear_better={macro_acc_ci.get('probability_linear_better')} |\n"
-            f"| timestep_auc_accuracy | {delta.get('timestep_auc_masked_token_accuracy')} | {winner.get('timestep_auc_masked_token_accuracy')} | bootstrap_p05_p95=[{auc_acc_ci.get('p05')}, {auc_acc_ci.get('p95')}], p_linear_better={auc_acc_ci.get('probability_linear_better')} |\n\n"
-            f"- avg_cross_entropy_delta_linear_minus_cosine: {delta.get('avg_cross_entropy')}\n"
-            f"- timestep_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_uniform_avg_cross_entropy')}\n"
-            f"- grid_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('grid_uniform_avg_cross_entropy')}\n"
-            f"- timestep_macro_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_macro_avg_cross_entropy')}\n"
-            f"- timestep_macro_bits_per_masked_token_delta_linear_minus_cosine: {delta.get('timestep_macro_bits_per_masked_token')}\n"
-            f"- timestep_auc_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_auc_avg_cross_entropy')}\n"
-            f"- timestep_auc_bits_per_masked_token_delta_linear_minus_cosine: {delta.get('timestep_auc_bits_per_masked_token')}\n"
+        comparison_lines.extend(
+            [
+                "",
+                f"- avg_cross_entropy_delta_linear_minus_cosine: {delta.get('avg_cross_entropy')}",
+                f"- timestep_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_uniform_avg_cross_entropy')}",
+                f"- grid_uniform_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('grid_uniform_avg_cross_entropy')}",
+                f"- timestep_macro_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_macro_avg_cross_entropy')}",
+                f"- timestep_macro_bits_per_masked_token_delta_linear_minus_cosine: {delta.get('timestep_macro_bits_per_masked_token')}",
+                f"- timestep_auc_avg_cross_entropy_delta_linear_minus_cosine: {delta.get('timestep_auc_avg_cross_entropy')}",
+                f"- timestep_auc_bits_per_masked_token_delta_linear_minus_cosine: {delta.get('timestep_auc_bits_per_masked_token')}",
+            ]
         )
+        comparison_block = "\n".join(comparison_lines) + "\n"
 
     readme_path.write_text(
         f"""---
@@ -168,8 +342,7 @@ This model repo contains artifacts exported from the DM_Labs notebook for a disc
 - optional `eval_summary.json`
 - optional `schedule_comparison.json`
 - optional schedule-comparison JSON artifacts
-{metrics_block}{protocol_block}{comparison_block}
-## Evaluation note
+{metrics_block}{protocol_block}{comparison_block}## Evaluation note
 
 The reported pseudo-perplexity is based on masked-token denoising NLL under a diffusion corruption process. It is **not** autoregressive next-token perplexity.
 
