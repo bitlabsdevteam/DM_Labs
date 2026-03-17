@@ -8,6 +8,10 @@ from dm_labs.hf_utils import build_eval_view_rows, build_schedule_comparison_row
 class HuggingFaceModelCardTests(unittest.TestCase):
     def test_model_card_surfaces_schedule_reweighted_and_uniform_accuracy_views(self):
         eval_summary = {
+            "vocab_size": 16,
+            "uniform_random_avg_cross_entropy": 2.772588722239781,
+            "uniform_random_pseudo_perplexity": 16.0,
+            "uniform_random_bits_per_masked_token": 4.0,
             "avg_cross_entropy": 1.0,
             "pseudo_perplexity": 2.0,
             "bits_per_masked_token": 3.0,
@@ -138,6 +142,9 @@ class HuggingFaceModelCardTests(unittest.TestCase):
 
         eval_rows = build_eval_view_rows(eval_summary)
         self.assertEqual(eval_rows[0]["view"], "token_weighted_sampled")
+        self.assertEqual(eval_rows[0]["uniform_random_pseudo_perplexity"], 16.0)
+        self.assertAlmostEqual(eval_rows[0]["bits_saved_vs_uniform"], 1.0, places=6)
+        self.assertAlmostEqual(eval_rows[0]["denoising_skill"], 1.0 - (1.0 / 2.772588722239781), places=6)
         self.assertEqual(eval_rows[0]["pseudo_perplexity_ci_p05"], 1.8)
         self.assertEqual(eval_rows[0]["masked_token_accuracy_ci_p95"], 0.5)
         self.assertEqual(eval_rows[1]["pseudo_perplexity_ci_p05"], 1.9)
@@ -161,8 +168,9 @@ class HuggingFaceModelCardTests(unittest.TestCase):
             )
             content = Path(card_path).read_text(encoding="utf-8")
 
-        self.assertIn("| timestep_uniform_sampled | uniform mean over sampled per-example timesteps | 1.1 | 2.1 | 3.1 | 0.41 | 1.9 | 2.3 | 0.31 | 0.51 |", content)
-        self.assertIn("| schedule_reweighted_sampled | inverse-expected-mask-ratio weighting over sampled masked tokens | 1.2 | 2.2 | 3.2 | 0.42 | 2.0 | 2.4 | 0.32 | 0.52 |", content)
+        self.assertIn("| timestep_uniform_sampled | uniform mean over sampled per-example timesteps | 1.1 | 2.1 | 16.0 | 3.1 | 0.8999999999999999 | 0.603258863755535 | 0.41 | 1.9 | 2.3 | 0.31 | 0.51 |", content)
+        self.assertIn("| schedule_reweighted_sampled | inverse-expected-mask-ratio weighting over sampled masked tokens | 1.2 | 2.2 | 16.0 | 3.2 | 0.7999999999999998 | 0.567191487733311 | 0.42 | 2.0 | 2.4 | 0.32 | 0.52 |", content)
+        self.assertIn("- uniform_random_pseudo_perplexity: 16.0", content)
         self.assertIn("- schedule_reweighted_aggregation: inverse_expected_mask_ratio_weighting_over_sampled_masked_tokens", content)
         self.assertIn("| schedule_reweighted_pseudo_perplexity | lower | 0.12 | cosine_schedule | -0.08 | 0.32 | 0.22 |", content)
         self.assertIn("| timestep_uniform_accuracy | higher | -0.021 | cosine_schedule | -0.041 | 0.001 | 0.11 |", content)

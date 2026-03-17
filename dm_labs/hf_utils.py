@@ -1,7 +1,44 @@
 import json
+import math
 import os
 from pathlib import Path
 from typing import Optional
+
+
+def _view_calibration(avg_cross_entropy, bits_per_masked_token, vocab_size: Optional[int]) -> dict:
+    if vocab_size is None or int(vocab_size) <= 0:
+        return {
+            "uniform_random_pseudo_perplexity": None,
+            "bits_saved_vs_uniform": None,
+            "denoising_skill": None,
+        }
+    if avg_cross_entropy is None or bits_per_masked_token is None:
+        return {
+            "uniform_random_pseudo_perplexity": float(vocab_size),
+            "bits_saved_vs_uniform": None,
+            "denoising_skill": None,
+        }
+    try:
+        avg_cross_entropy = float(avg_cross_entropy)
+        bits_per_masked_token = float(bits_per_masked_token)
+    except (TypeError, ValueError):
+        return {
+            "uniform_random_pseudo_perplexity": float(vocab_size),
+            "bits_saved_vs_uniform": None,
+            "denoising_skill": None,
+        }
+    if math.isnan(avg_cross_entropy) or math.isnan(bits_per_masked_token):
+        return {
+            "uniform_random_pseudo_perplexity": float(vocab_size),
+            "bits_saved_vs_uniform": float("nan"),
+            "denoising_skill": float("nan"),
+        }
+    uniform_bits = math.log(float(vocab_size)) / math.log(2.0)
+    return {
+        "uniform_random_pseudo_perplexity": float(vocab_size),
+        "bits_saved_vs_uniform": uniform_bits - bits_per_masked_token,
+        "denoising_skill": 1.0 - (avg_cross_entropy / math.log(float(vocab_size))),
+    }
 
 
 EVAL_VIEW_SPECS = [
@@ -173,17 +210,21 @@ def build_eval_view_rows(eval_summary: Optional[dict] = None) -> list:
         return []
 
     rows = []
+    vocab_size = eval_summary.get("vocab_size")
     for spec in EVAL_VIEW_SPECS:
         metric_ci = _extract_ci(eval_summary, spec["ci_container_key"], spec["ci_metric_key"])
         accuracy_ci = _extract_ci(eval_summary, spec["ci_container_key"], spec["ci_accuracy_key"])
+        avg_cross_entropy = eval_summary.get(spec["avg_cross_entropy_key"])
+        bits_per_masked_token = eval_summary.get(spec["bits_key"])
         rows.append(
             {
                 "view": spec["view"],
                 "aggregation": spec["aggregation"],
-                "avg_cross_entropy": eval_summary.get(spec["avg_cross_entropy_key"]),
+                "avg_cross_entropy": avg_cross_entropy,
                 "pseudo_perplexity": eval_summary.get(spec["pseudo_perplexity_key"]),
-                "bits_per_masked_token": eval_summary.get(spec["bits_key"]),
+                "bits_per_masked_token": bits_per_masked_token,
                 "masked_token_accuracy": eval_summary.get(spec["accuracy_key"]),
+                **_view_calibration(avg_cross_entropy, bits_per_masked_token, vocab_size),
                 "pseudo_perplexity_ci_p05": metric_ci.get("p05"),
                 "pseudo_perplexity_ci_p95": metric_ci.get("p95"),
                 "masked_token_accuracy_ci_p05": accuracy_ci.get("p05"),
@@ -254,17 +295,21 @@ def ensure_hf_model_card(
         eval_rows = build_eval_view_rows(eval_summary)
         metrics_lines = [
             "\n## Evaluation summary\n",
-            "| view | aggregation | avg_cross_entropy | pseudo_perplexity | bits_per_masked_token | masked_token_accuracy | pseudo_perplexity_ci_p05 | pseudo_perplexity_ci_p95 | accuracy_ci_p05 | accuracy_ci_p95 |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| view | aggregation | avg_cross_entropy | pseudo_perplexity | uniform_random_pseudo_perplexity | bits_per_masked_token | bits_saved_vs_uniform | denoising_skill | masked_token_accuracy | pseudo_perplexity_ci_p05 | pseudo_perplexity_ci_p95 | accuracy_ci_p05 | accuracy_ci_p95 |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
         for row in eval_rows:
             metrics_lines.append(
-                f"| {row['view']} | {row['aggregation']} | {row['avg_cross_entropy']} | {row['pseudo_perplexity']} | {row['bits_per_masked_token']} | {row['masked_token_accuracy']} | {row['pseudo_perplexity_ci_p05']} | {row['pseudo_perplexity_ci_p95']} | {row['masked_token_accuracy_ci_p05']} | {row['masked_token_accuracy_ci_p95']} |"
+                f"| {row['view']} | {row['aggregation']} | {row['avg_cross_entropy']} | {row['pseudo_perplexity']} | {row['uniform_random_pseudo_perplexity']} | {row['bits_per_masked_token']} | {row['bits_saved_vs_uniform']} | {row['denoising_skill']} | {row['masked_token_accuracy']} | {row['pseudo_perplexity_ci_p05']} | {row['pseudo_perplexity_ci_p95']} | {row['masked_token_accuracy_ci_p05']} | {row['masked_token_accuracy_ci_p95']} |"
             )
         metrics_lines.extend(
             [
                 "",
                 f"- metric: {eval_summary.get('metric', 'diffusion_pseudo_perplexity')}",
+                f"- vocab_size: {eval_summary.get('vocab_size')}",
+                f"- uniform_random_pseudo_perplexity: {eval_summary.get('uniform_random_pseudo_perplexity')}",
+                f"- uniform_random_avg_cross_entropy: {eval_summary.get('uniform_random_avg_cross_entropy')}",
+                f"- uniform_random_bits_per_masked_token: {eval_summary.get('uniform_random_bits_per_masked_token')}",
                 f"- sampled_example_count: {eval_summary.get('sampled_example_count')}",
                 f"- masked_tokens: {eval_summary.get('masked_tokens')}",
                 f"- n_batches: {eval_summary.get('n_batches')}",
@@ -345,6 +390,8 @@ This model repo contains artifacts exported from the DM_Labs notebook for a disc
 {metrics_block}{protocol_block}{comparison_block}## Evaluation note
 
 The reported pseudo-perplexity is based on masked-token denoising NLL under a diffusion corruption process. It is **not** autoregressive next-token perplexity.
+
+To make the pseudo-perplexity-style views easier to interpret, the exported tables also calibrate each aggregate against a same-vocabulary uniform-random baseline, exposing `bits_saved_vs_uniform` and `denoising_skill = 1 - CE / log(|V|)`.
 
 For reproducibility, the notebook can export the exact evaluation summary used for this upload into `eval_summary.json` and the paired linear-vs-cosine summary into `schedule_comparison.json`.
 """,

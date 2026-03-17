@@ -10,6 +10,24 @@ import torch.nn.functional as F
 Tensor = torch.Tensor
 
 
+def _uniform_baseline_summary(vocab_size: Optional[int]) -> Dict[str, float]:
+    if vocab_size is None or int(vocab_size) <= 0:
+        return {
+            "vocab_size": None,
+            "uniform_random_avg_cross_entropy": float("nan"),
+            "uniform_random_pseudo_perplexity": float("nan"),
+            "uniform_random_bits_per_masked_token": float("nan"),
+        }
+    vocab_size = int(vocab_size)
+    uniform_ce = math.log(float(vocab_size))
+    return {
+        "vocab_size": vocab_size,
+        "uniform_random_avg_cross_entropy": uniform_ce,
+        "uniform_random_pseudo_perplexity": float(vocab_size),
+        "uniform_random_bits_per_masked_token": uniform_ce / math.log(2.0),
+    }
+
+
 def _normalize_excluded_token_ids(excluded_token_ids: Optional[Sequence[Optional[int]]]) -> List[int]:
     if excluded_token_ids is None:
         return []
@@ -28,6 +46,16 @@ def _safe_exp(value: float) -> float:
     return math.exp(min(80.0, value))
 
 
+def _expected_top1_correct_count(logits: Tensor, targets: Tensor) -> float:
+    if logits.numel() == 0:
+        return 0.0
+    max_logits = logits.max(dim=-1, keepdim=True).values
+    is_tied_max = logits == max_logits
+    tie_counts = is_tied_max.sum(dim=-1).clamp(min=1).to(dtype=torch.float64)
+    target_is_tied_max = is_tied_max.gather(dim=-1, index=targets.unsqueeze(-1)).squeeze(-1).to(dtype=torch.float64)
+    return float((target_is_tied_max / tie_counts).sum().item())
+
+
 def _timestep_fraction_from_int(timestep: int, T: int) -> float:
     if T <= 0:
         raise ValueError(f"T must be positive, got {T}")
@@ -35,23 +63,28 @@ def _timestep_fraction_from_int(timestep: int, T: int) -> float:
 
 
 def _resolve_eval_timesteps(timestep_plan: Dict[str, object], T: int, device: torch.device) -> Tuple[Tensor, Tensor, Tensor]:
+    source_t = timestep_plan.get("t")
+    if source_t is not None and not isinstance(source_t, torch.Tensor):
+        source_t = torch.tensor(source_t, dtype=torch.long)
+    if isinstance(source_t, torch.Tensor):
+        source_t = source_t.detach().cpu().long()
+
     if "u" in timestep_plan and timestep_plan["u"] is not None:
         u = timestep_plan["u"]
         if not isinstance(u, torch.Tensor):
             u = torch.tensor(u, dtype=torch.float32)
         u = u.to(device=device, dtype=torch.float32)
         eval_t = torch.clamp(torch.round(u * float(T)), min=1, max=T).long()
-        return eval_t, u, eval_t.detach().cpu()
+        if source_t is None:
+            source_t = eval_t.detach().cpu()
+        return eval_t, u, source_t
 
-    if "t" not in timestep_plan or timestep_plan["t"] is None:
+    if source_t is None:
         raise ValueError("Each timestep_plan must provide either 'u' (normalized timestep fractions) or 't' (integer timesteps).")
 
-    eval_t = timestep_plan["t"]
-    if not isinstance(eval_t, torch.Tensor):
-        eval_t = torch.tensor(eval_t, dtype=torch.long)
-    eval_t = eval_t.to(device=device, dtype=torch.long)
+    eval_t = source_t.to(device=device, dtype=torch.long)
     u = (eval_t.float() / float(T)).detach().cpu()
-    return eval_t, u.to(device=device), eval_t.detach().cpu()
+    return eval_t, u.to(device=device), source_t
 
 
 def _bootstrap_metric_interval(
@@ -609,8 +642,8 @@ def _bootstrap_paired_comparison_interval(
             linear_nll += float(linear_rec["nll_sum"])
             cosine_masked += int(cosine_rec["masked_tokens"])
             linear_masked += int(linear_rec["masked_tokens"])
-            cosine_correct += int(cosine_rec.get("correct_masked_tokens", 0))
-            linear_correct += int(linear_rec.get("correct_masked_tokens", 0))
+            cosine_correct += float(cosine_rec.get("correct_masked_tokens", 0))
+            linear_correct += float(linear_rec.get("correct_masked_tokens", 0))
 
         if cosine_masked > 0 and linear_masked > 0:
             cosine_ce = cosine_nll / cosine_masked
@@ -913,9 +946,15 @@ def build_eval_plan(
     }
 
 
-def _empty_eval_result(n_batches: int, seed: int, excluded_token_ids: Optional[Sequence[Optional[int]]]) -> Dict[str, object]:
+def _empty_eval_result(
+    n_batches: int,
+    seed: int,
+    excluded_token_ids: Optional[Sequence[Optional[int]]],
+    vocab_size: Optional[int] = None,
+) -> Dict[str, object]:
     return {
         "metric": "diffusion_pseudo_perplexity",
+        **_uniform_baseline_summary(vocab_size),
         "avg_cross_entropy": float("nan"),
         "pseudo_perplexity": float("nan"),
         "bits_per_masked_token": float("nan"),
@@ -984,8 +1023,9 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
 
     total_nll = 0.0
     total_masked_tokens = 0
-    total_correct = 0
+    total_correct = 0.0
     sampled_example_ce_sum = 0.0
+    observed_vocab_size: Optional[int] = None
     sampled_example_accuracy_sum = 0.0
     sampled_example_count = 0
     schedule_fn = _resolve_schedule_fn(schedule_name)
@@ -1020,11 +1060,12 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 continue
 
             logits = model(noisy_ids, timesteps=eval_t, attention_mask=attention_mask)
+            if observed_vocab_size is None:
+                observed_vocab_size = int(logits.size(-1))
             masked_logits = logits[mask_positions]
             masked_targets = labels[mask_positions]
             token_nll_sum = float(F.cross_entropy(masked_logits, masked_targets, reduction="sum").item())
-            predictions = masked_logits.argmax(dim=-1)
-            correct = int((predictions == masked_targets).sum().item())
+            correct = _expected_top1_correct_count(masked_logits, masked_targets)
 
             if timestep_plan["kind"] == "sampled":
                 total_nll += token_nll_sum
@@ -1043,7 +1084,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                         "batch_index": batch_idx,
                         "nll_sum": token_nll_sum,
                         "masked_tokens": masked_count,
-                        "correct_masked_tokens": correct,
+                        "correct_masked_tokens": float(correct),
                         "avg_cross_entropy": batch_ce,
                         "pseudo_perplexity": _safe_exp(batch_ce),
                         "bits_per_masked_token": batch_ce / math.log(2.0),
@@ -1064,7 +1105,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                     example_targets = labels[example_idx][example_mask]
                     example_nll_sum = float(F.cross_entropy(example_logits, example_targets, reduction="sum").item())
                     example_ce = example_nll_sum / example_masked_tokens
-                    example_correct = int((example_logits.argmax(dim=-1) == example_targets).sum().item())
+                    example_correct = _expected_top1_correct_count(example_logits, example_targets)
                     example_accuracy = example_correct / example_masked_tokens
                     sampled_example_ce_sum += example_ce
                     sampled_example_accuracy_sum += example_accuracy
@@ -1124,7 +1165,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                         "timestep_fraction": float(timestep_fraction[0].item()),
                         "nll_sum": token_nll_sum,
                         "masked_tokens": masked_count,
-                        "correct_masked_tokens": correct,
+                        "correct_masked_tokens": float(correct),
                         "avg_cross_entropy": batch_ce,
                         "pseudo_perplexity": _safe_exp(batch_ce),
                         "bits_per_masked_token": batch_ce / math.log(2.0),
@@ -1133,39 +1174,60 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                     }
                 )
 
-    if total_masked_tokens == 0:
+    timestep_metrics = []
+    for t in sorted(timestep_records):
+        rec = timestep_records[t]
+        if rec["masked_tokens"] == 0:
+            continue
+        ce = rec["nll_sum"] / rec["masked_tokens"]
+        timestep_metrics.append(
+            {
+                "timestep": int(rec.get("timestep", t)),
+                "source_plan_timestep": int(rec.get("source_plan_timestep", t)),
+                "timestep_fraction": float(rec.get("timestep_fraction", _timestep_fraction_from_int(t, T))),
+                "avg_cross_entropy": ce,
+                "pseudo_perplexity": _safe_exp(ce),
+                "bits_per_masked_token": ce / math.log(2.0),
+                "masked_tokens": rec["masked_tokens"],
+                "mean_mask_fraction": rec["mask_ratio_sum"] / max(1, rec["examples"]),
+                "masked_token_accuracy": rec["correct"] / rec["masked_tokens"],
+            }
+        )
+
+    if total_masked_tokens == 0 and not grid_batch_metrics:
         result = _empty_eval_result(
             n_batches=int(eval_plan.get("n_batches", 0)),
             seed=int(eval_plan.get("seed", 0)),
             excluded_token_ids=excluded_token_ids,
+            vocab_size=observed_vocab_size,
         )
     else:
-        avg_ce = total_nll / total_masked_tokens
-        timestep_metrics = []
-        for t in sorted(timestep_records):
-            rec = timestep_records[t]
-            if rec["masked_tokens"] == 0:
-                continue
-            ce = rec["nll_sum"] / rec["masked_tokens"]
-            timestep_metrics.append(
-                {
-                    "timestep": int(rec.get("timestep", t)),
-                    "source_plan_timestep": int(rec.get("source_plan_timestep", t)),
-                    "timestep_fraction": float(rec.get("timestep_fraction", _timestep_fraction_from_int(t, T))),
-                    "avg_cross_entropy": ce,
-                    "pseudo_perplexity": _safe_exp(ce),
-                    "bits_per_masked_token": ce / math.log(2.0),
-                    "masked_tokens": rec["masked_tokens"],
-                    "mean_mask_fraction": rec["mask_ratio_sum"] / max(1, rec["examples"]),
-                    "masked_token_accuracy": rec["correct"] / rec["masked_tokens"],
-                }
-            )
+        aggregate_nll = total_nll
+        aggregate_masked_tokens = total_masked_tokens
+        aggregate_correct = total_correct
+        if aggregate_masked_tokens == 0 and grid_batch_metrics:
+            aggregate_nll = sum(float(row["nll_sum"]) for row in grid_batch_metrics)
+            aggregate_masked_tokens = sum(int(row["masked_tokens"]) for row in grid_batch_metrics)
+            aggregate_correct = sum(float(row.get("correct_masked_tokens", 0.0)) for row in grid_batch_metrics)
 
-        timestep_uniform_avg_ce = sampled_example_ce_sum / sampled_example_count if sampled_example_count else float("nan")
-        timestep_uniform_masked_token_accuracy = sampled_example_accuracy_sum / sampled_example_count if sampled_example_count else float("nan")
+        avg_ce = aggregate_nll / aggregate_masked_tokens if aggregate_masked_tokens > 0 else float("nan")
+
+        if sampled_example_count:
+            timestep_uniform_avg_ce = sampled_example_ce_sum / sampled_example_count
+            timestep_uniform_masked_token_accuracy = sampled_example_accuracy_sum / sampled_example_count
+        elif timestep_metrics:
+            timestep_uniform_avg_ce = sum(float(row["avg_cross_entropy"]) for row in timestep_metrics) / len(timestep_metrics)
+            timestep_uniform_masked_token_accuracy = sum(float(row["masked_token_accuracy"]) for row in timestep_metrics) / len(timestep_metrics)
+        else:
+            timestep_uniform_avg_ce = float("nan")
+            timestep_uniform_masked_token_accuracy = float("nan")
+
         if schedule_reweighted_masked_tokens > 0.0:
             schedule_reweighted_avg_ce = schedule_reweighted_nll_sum / schedule_reweighted_masked_tokens
             schedule_reweighted_masked_token_accuracy = schedule_reweighted_correct / schedule_reweighted_masked_tokens
+        elif timestep_metrics:
+            schedule_reweighted_avg_ce = sum(float(row["avg_cross_entropy"]) for row in timestep_metrics) / len(timestep_metrics)
+            schedule_reweighted_masked_token_accuracy = sum(float(row["masked_token_accuracy"]) for row in timestep_metrics) / len(timestep_metrics)
         else:
             schedule_reweighted_avg_ce = float("nan")
             schedule_reweighted_masked_token_accuracy = float("nan")
@@ -1177,13 +1239,34 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             grid_uniform_masked_token_accuracy = float("nan")
         timestep_macro_metrics = _compute_timestep_macro_metrics(timestep_metrics)
         timestep_auc_metrics = _compute_timestep_auc_metrics(timestep_metrics)
+        ci_example_metrics = sampled_example_metrics
+        if not ci_example_metrics and timestep_metrics:
+            ci_example_metrics = [
+                {
+                    "batch_index": -1,
+                    "example_index": idx,
+                    "timestep": int(row["timestep"]),
+                    "source_plan_timestep": int(row.get("source_plan_timestep", row["timestep"])),
+                    "timestep_fraction": float(row["timestep_fraction"]),
+                    "nll_sum": float(row["avg_cross_entropy"]) * float(row["masked_tokens"]),
+                    "masked_tokens": int(row["masked_tokens"]),
+                    "correct_masked_tokens": int(round(float(row["masked_token_accuracy"]) * float(row["masked_tokens"]))),
+                    "avg_cross_entropy": float(row["avg_cross_entropy"]),
+                    "pseudo_perplexity": float(row["pseudo_perplexity"]),
+                    "bits_per_masked_token": float(row["bits_per_masked_token"]),
+                    "masked_token_accuracy": float(row["masked_token_accuracy"]),
+                    "schedule_reweighted_weight": 1.0,
+                }
+                for idx, row in enumerate(timestep_metrics)
+            ]
 
         result = {
             "metric": "diffusion_pseudo_perplexity",
+            **_uniform_baseline_summary(observed_vocab_size),
             "avg_cross_entropy": avg_ce,
             "pseudo_perplexity": _safe_exp(avg_ce),
             "bits_per_masked_token": avg_ce / math.log(2.0),
-            "masked_token_accuracy": total_correct / total_masked_tokens,
+            "masked_token_accuracy": aggregate_correct / aggregate_masked_tokens if aggregate_masked_tokens > 0 else float("nan"),
             "timestep_uniform_avg_cross_entropy": timestep_uniform_avg_ce,
             "timestep_uniform_pseudo_perplexity": _safe_exp(timestep_uniform_avg_ce),
             "timestep_uniform_bits_per_masked_token": timestep_uniform_avg_ce / math.log(2.0) if not math.isnan(timestep_uniform_avg_ce) else float("nan"),
@@ -1214,12 +1297,12 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 seed=int(eval_plan.get("seed", 0)),
             ),
             "timestep_uniform_confidence_intervals": _bootstrap_example_uniform_metric_interval(
-                sampled_example_metrics,
+                ci_example_metrics,
                 n_samples=bootstrap_samples,
                 seed=int(eval_plan.get("seed", 0)),
             ),
             "schedule_reweighted_confidence_intervals": _bootstrap_reweighted_metric_interval(
-                sampled_example_metrics,
+                ci_example_metrics,
                 weight_key="schedule_reweighted_weight",
                 n_samples=bootstrap_samples,
                 seed=int(eval_plan.get("seed", 0)),
@@ -1236,6 +1319,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             ),
             "notes": [
                 "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
+                "The exported uniform-random baseline uses the model vocabulary size, so bits-saved and denoising-skill views are calibrated against random guessing on the same tokenizer.",
                 "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
                 "Timestep-uniform CE averages per-example masked-token CE over uniformly sampled timesteps, making schedule comparisons less sensitive to different mask-count profiles.",
                 "Schedule-reweighted CE applies inverse expected mask-ratio weights to sampled masked tokens, estimating a uniform-over-mask-eligible-token-and-timestep denoising objective directly from sampled batches.",

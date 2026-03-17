@@ -19,6 +19,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
 - `dm_labs/eval_utils.py`
   - reusable diffusion evaluation helpers
   - token-weighted pseudo-perplexity computation
+  - vocabulary-calibrated uniform-random baselines so each denoising aggregate can also be read as bits saved vs random guessing / denoising skill
   - timestep-uniform denoising CE / pseudo-perplexity
   - mask-ratio-reweighted sampled denoising CE / pseudo-perplexity for schedule-corrected sampled evaluation
   - fixed-grid-uniform denoising CE / pseudo-perplexity over cached diagnostic timesteps
@@ -81,6 +82,7 @@ Current protocol improvements in the repo:
 - surface a **normalized timestep-fraction AUC** view so schedule comparisons can summarize the denoising trajectory without depending on equal timestep spacing
 - expose a **fixed-grid shared-timestep aggregate** plus paired uncertainty so cosine-vs-linear claims can be checked on an explicit common denoising surface
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts
+- calibrate denoising CE / pseudo-perplexity views against a same-tokenizer uniform-random baseline, exposing bits-saved and denoising-skill summaries in notebook/HF outputs
 - surface when normalized timestep remapping was used in cross-checkpoint comparisons and Hugging Face artifacts
 
 ## Current Notebook Capabilities

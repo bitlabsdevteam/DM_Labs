@@ -53,6 +53,9 @@ class EvalPlanRemapTests(unittest.TestCase):
             schedule_name="cosine",
             bootstrap_samples=8,
         )
+        self.assertEqual(result["vocab_size"], 8)
+        self.assertAlmostEqual(result["uniform_random_pseudo_perplexity"], 8.0, places=6)
+        self.assertAlmostEqual(result["uniform_random_avg_cross_entropy"], torch.log(torch.tensor(8.0)).item(), places=6)
         metrics = result["timestep_metrics"]
         self.assertEqual([row["source_plan_timestep"] for row in metrics], [5, 10])
         self.assertEqual([row["timestep"] for row in metrics], [10, 20])
