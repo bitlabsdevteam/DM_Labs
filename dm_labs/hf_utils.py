@@ -118,6 +118,35 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "pseudo_perplexity",
         "ci_key": "pseudo_perplexity",
         "better_direction": "lower",
+        "cosine_value_key": ("model", "pseudo_perplexity"),
+        "linear_value_key": ("model", "pseudo_perplexity"),
+    },
+    {
+        "metric_view": "sampled_bits_per_masked_token",
+        "delta_key": "bits_per_masked_token",
+        "winner_key": "bits_per_masked_token",
+        "ci_key": "bits_per_masked_token",
+        "better_direction": "lower",
+        "cosine_value_key": ("model", "bits_per_masked_token"),
+        "linear_value_key": ("model", "bits_per_masked_token"),
+    },
+    {
+        "metric_view": "sampled_bits_saved_vs_uniform",
+        "delta_key": "sampled_bits_saved_vs_uniform",
+        "winner_key": "sampled_bits_saved_vs_uniform",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "sampled", "bits_saved_vs_uniform"),
+        "linear_value_key": ("calibration", "sampled", "bits_saved_vs_uniform"),
+    },
+    {
+        "metric_view": "sampled_denoising_skill",
+        "delta_key": "sampled_denoising_skill",
+        "winner_key": "sampled_denoising_skill",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "sampled", "denoising_skill"),
+        "linear_value_key": ("calibration", "sampled", "denoising_skill"),
     },
     {
         "metric_view": "timestep_uniform_pseudo_perplexity",
@@ -125,6 +154,35 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "timestep_uniform_pseudo_perplexity",
         "ci_key": "timestep_uniform_pseudo_perplexity",
         "better_direction": "lower",
+        "cosine_value_key": ("model", "timestep_uniform_pseudo_perplexity"),
+        "linear_value_key": ("model", "timestep_uniform_pseudo_perplexity"),
+    },
+    {
+        "metric_view": "timestep_uniform_bits_per_masked_token",
+        "delta_key": "timestep_uniform_bits_per_masked_token",
+        "winner_key": "timestep_uniform_bits_per_masked_token",
+        "ci_key": "timestep_uniform_bits_per_masked_token",
+        "better_direction": "lower",
+        "cosine_value_key": ("model", "timestep_uniform_bits_per_masked_token"),
+        "linear_value_key": ("model", "timestep_uniform_bits_per_masked_token"),
+    },
+    {
+        "metric_view": "timestep_uniform_bits_saved_vs_uniform",
+        "delta_key": "timestep_uniform_bits_saved_vs_uniform",
+        "winner_key": "timestep_uniform_bits_saved_vs_uniform",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "timestep_uniform", "bits_saved_vs_uniform"),
+        "linear_value_key": ("calibration", "timestep_uniform", "bits_saved_vs_uniform"),
+    },
+    {
+        "metric_view": "timestep_uniform_denoising_skill",
+        "delta_key": "timestep_uniform_denoising_skill",
+        "winner_key": "timestep_uniform_denoising_skill",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "timestep_uniform", "denoising_skill"),
+        "linear_value_key": ("calibration", "timestep_uniform", "denoising_skill"),
     },
     {
         "metric_view": "schedule_reweighted_pseudo_perplexity",
@@ -132,6 +190,35 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "schedule_reweighted_pseudo_perplexity",
         "ci_key": "schedule_reweighted_pseudo_perplexity",
         "better_direction": "lower",
+        "cosine_value_key": ("model", "schedule_reweighted_pseudo_perplexity"),
+        "linear_value_key": ("model", "schedule_reweighted_pseudo_perplexity"),
+    },
+    {
+        "metric_view": "schedule_reweighted_bits_per_masked_token",
+        "delta_key": "schedule_reweighted_bits_per_masked_token",
+        "winner_key": "schedule_reweighted_bits_per_masked_token",
+        "ci_key": "schedule_reweighted_bits_per_masked_token",
+        "better_direction": "lower",
+        "cosine_value_key": ("model", "schedule_reweighted_bits_per_masked_token"),
+        "linear_value_key": ("model", "schedule_reweighted_bits_per_masked_token"),
+    },
+    {
+        "metric_view": "schedule_reweighted_bits_saved_vs_uniform",
+        "delta_key": "schedule_reweighted_bits_saved_vs_uniform",
+        "winner_key": "schedule_reweighted_bits_saved_vs_uniform",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "schedule_reweighted", "bits_saved_vs_uniform"),
+        "linear_value_key": ("calibration", "schedule_reweighted", "bits_saved_vs_uniform"),
+    },
+    {
+        "metric_view": "schedule_reweighted_denoising_skill",
+        "delta_key": "schedule_reweighted_denoising_skill",
+        "winner_key": "schedule_reweighted_denoising_skill",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "schedule_reweighted", "denoising_skill"),
+        "linear_value_key": ("calibration", "schedule_reweighted", "denoising_skill"),
     },
     {
         "metric_view": "grid_uniform_pseudo_perplexity",
@@ -139,6 +226,35 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "grid_uniform_pseudo_perplexity",
         "ci_key": "grid_uniform_pseudo_perplexity",
         "better_direction": "lower",
+        "cosine_value_key": ("model", "grid_uniform_pseudo_perplexity"),
+        "linear_value_key": ("model", "grid_uniform_pseudo_perplexity"),
+    },
+    {
+        "metric_view": "grid_uniform_bits_per_masked_token",
+        "delta_key": "grid_uniform_bits_per_masked_token",
+        "winner_key": "grid_uniform_bits_per_masked_token",
+        "ci_key": "grid_uniform_bits_per_masked_token",
+        "better_direction": "lower",
+        "cosine_value_key": ("model", "grid_uniform_bits_per_masked_token"),
+        "linear_value_key": ("model", "grid_uniform_bits_per_masked_token"),
+    },
+    {
+        "metric_view": "grid_uniform_bits_saved_vs_uniform",
+        "delta_key": "grid_uniform_bits_saved_vs_uniform",
+        "winner_key": "grid_uniform_bits_saved_vs_uniform",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "grid_uniform", "bits_saved_vs_uniform"),
+        "linear_value_key": ("calibration", "grid_uniform", "bits_saved_vs_uniform"),
+    },
+    {
+        "metric_view": "grid_uniform_denoising_skill",
+        "delta_key": "grid_uniform_denoising_skill",
+        "winner_key": "grid_uniform_denoising_skill",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "grid_uniform", "denoising_skill"),
+        "linear_value_key": ("calibration", "grid_uniform", "denoising_skill"),
     },
     {
         "metric_view": "timestep_macro_pseudo_perplexity",
@@ -146,6 +262,35 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "timestep_macro_pseudo_perplexity",
         "ci_key": "timestep_macro_pseudo_perplexity",
         "better_direction": "lower",
+        "cosine_value_key": ("model", "timestep_macro_pseudo_perplexity"),
+        "linear_value_key": ("model", "timestep_macro_pseudo_perplexity"),
+    },
+    {
+        "metric_view": "timestep_macro_bits_per_masked_token",
+        "delta_key": "timestep_macro_bits_per_masked_token",
+        "winner_key": "timestep_macro_bits_per_masked_token",
+        "ci_key": "timestep_macro_bits_per_masked_token",
+        "better_direction": "lower",
+        "cosine_value_key": ("model", "timestep_macro_bits_per_masked_token"),
+        "linear_value_key": ("model", "timestep_macro_bits_per_masked_token"),
+    },
+    {
+        "metric_view": "timestep_macro_bits_saved_vs_uniform",
+        "delta_key": "timestep_macro_bits_saved_vs_uniform",
+        "winner_key": "timestep_macro_bits_saved_vs_uniform",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "timestep_macro", "bits_saved_vs_uniform"),
+        "linear_value_key": ("calibration", "timestep_macro", "bits_saved_vs_uniform"),
+    },
+    {
+        "metric_view": "timestep_macro_denoising_skill",
+        "delta_key": "timestep_macro_denoising_skill",
+        "winner_key": "timestep_macro_denoising_skill",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "timestep_macro", "denoising_skill"),
+        "linear_value_key": ("calibration", "timestep_macro", "denoising_skill"),
     },
     {
         "metric_view": "timestep_auc_pseudo_perplexity",
@@ -153,6 +298,35 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "timestep_auc_pseudo_perplexity",
         "ci_key": "timestep_auc_pseudo_perplexity",
         "better_direction": "lower",
+        "cosine_value_key": ("model", "timestep_auc_pseudo_perplexity"),
+        "linear_value_key": ("model", "timestep_auc_pseudo_perplexity"),
+    },
+    {
+        "metric_view": "timestep_auc_bits_per_masked_token",
+        "delta_key": "timestep_auc_bits_per_masked_token",
+        "winner_key": "timestep_auc_bits_per_masked_token",
+        "ci_key": "timestep_auc_bits_per_masked_token",
+        "better_direction": "lower",
+        "cosine_value_key": ("model", "timestep_auc_bits_per_masked_token"),
+        "linear_value_key": ("model", "timestep_auc_bits_per_masked_token"),
+    },
+    {
+        "metric_view": "timestep_auc_bits_saved_vs_uniform",
+        "delta_key": "timestep_auc_bits_saved_vs_uniform",
+        "winner_key": "timestep_auc_bits_saved_vs_uniform",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "timestep_auc", "bits_saved_vs_uniform"),
+        "linear_value_key": ("calibration", "timestep_auc", "bits_saved_vs_uniform"),
+    },
+    {
+        "metric_view": "timestep_auc_denoising_skill",
+        "delta_key": "timestep_auc_denoising_skill",
+        "winner_key": "timestep_auc_denoising_skill",
+        "ci_key": None,
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "timestep_auc", "denoising_skill"),
+        "linear_value_key": ("calibration", "timestep_auc", "denoising_skill"),
     },
     {
         "metric_view": "sampled_accuracy",
@@ -160,6 +334,8 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "masked_token_accuracy",
         "ci_key": "masked_token_accuracy",
         "better_direction": "higher",
+        "cosine_value_key": ("model", "masked_token_accuracy"),
+        "linear_value_key": ("model", "masked_token_accuracy"),
     },
     {
         "metric_view": "timestep_uniform_accuracy",
@@ -167,6 +343,8 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "timestep_uniform_masked_token_accuracy",
         "ci_key": "timestep_uniform_masked_token_accuracy",
         "better_direction": "higher",
+        "cosine_value_key": ("model", "timestep_uniform_masked_token_accuracy"),
+        "linear_value_key": ("model", "timestep_uniform_masked_token_accuracy"),
     },
     {
         "metric_view": "schedule_reweighted_accuracy",
@@ -174,6 +352,8 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "schedule_reweighted_masked_token_accuracy",
         "ci_key": "schedule_reweighted_masked_token_accuracy",
         "better_direction": "higher",
+        "cosine_value_key": ("model", "schedule_reweighted_masked_token_accuracy"),
+        "linear_value_key": ("model", "schedule_reweighted_masked_token_accuracy"),
     },
     {
         "metric_view": "grid_uniform_accuracy",
@@ -181,6 +361,8 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "grid_uniform_masked_token_accuracy",
         "ci_key": "grid_uniform_masked_token_accuracy",
         "better_direction": "higher",
+        "cosine_value_key": ("model", "grid_uniform_masked_token_accuracy"),
+        "linear_value_key": ("model", "grid_uniform_masked_token_accuracy"),
     },
     {
         "metric_view": "timestep_macro_accuracy",
@@ -188,6 +370,8 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "timestep_macro_masked_token_accuracy",
         "ci_key": "timestep_macro_masked_token_accuracy",
         "better_direction": "higher",
+        "cosine_value_key": ("model", "timestep_macro_masked_token_accuracy"),
+        "linear_value_key": ("model", "timestep_macro_masked_token_accuracy"),
     },
     {
         "metric_view": "timestep_auc_accuracy",
@@ -195,8 +379,11 @@ COMPARISON_VIEW_SPECS = [
         "winner_key": "timestep_auc_masked_token_accuracy",
         "ci_key": "timestep_auc_masked_token_accuracy",
         "better_direction": "higher",
+        "cosine_value_key": ("model", "timestep_auc_masked_token_accuracy"),
+        "linear_value_key": ("model", "timestep_auc_masked_token_accuracy"),
     },
 ]
+
 
 
 def _extract_ci(summary: Optional[dict], container_key: Optional[str], metric_key: Optional[str]) -> dict:
@@ -234,6 +421,18 @@ def build_eval_view_rows(eval_summary: Optional[dict] = None) -> list:
     return rows
 
 
+def _nested_get(container, path):
+    value = container
+    for key in path:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            value = value.get(key)
+        else:
+            return None
+    return value
+
+
 def build_schedule_comparison_rows(comparison_summary: Optional[dict] = None) -> list:
     if not comparison_summary or len(comparison_summary.get("models", [])) < 2:
         return []
@@ -241,13 +440,23 @@ def build_schedule_comparison_rows(comparison_summary: Optional[dict] = None) ->
     delta = comparison_summary.get("delta") or {}
     winner = comparison_summary.get("winner") or {}
     delta_ci = ((comparison_summary.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {})
+    models = comparison_summary.get("models") or []
+    cosine_model = models[0] if len(models) > 0 else {}
+    linear_model = models[1] if len(models) > 1 else {}
+    calibration = comparison_summary.get("calibration") or {}
+    cosine_calibration = calibration.get("cosine_schedule") or {}
+    linear_calibration = calibration.get("linear_schedule_baseline") or {}
     rows = []
     for spec in COMPARISON_VIEW_SPECS:
         ci = delta_ci.get(spec["ci_key"]) or {}
+        cosine_value = _nested_get(cosine_model, spec["cosine_value_key"][1:]) if spec["cosine_value_key"][0] == "model" else _nested_get(cosine_calibration, spec["cosine_value_key"][1:])
+        linear_value = _nested_get(linear_model, spec["linear_value_key"][1:]) if spec["linear_value_key"][0] == "model" else _nested_get(linear_calibration, spec["linear_value_key"][1:])
         rows.append(
             {
                 "metric_view": spec["metric_view"],
                 "better_direction": spec["better_direction"],
+                "cosine_value": cosine_value,
+                "linear_value": linear_value,
                 "delta_linear_minus_cosine": delta.get(spec["delta_key"]),
                 "winner": winner.get(spec["winner_key"]),
                 "bootstrap_p05": ci.get("p05"),
@@ -343,12 +552,12 @@ def ensure_hf_model_card(
     if comparison_rows:
         comparison_lines = [
             "\n## Schedule comparison\n",
-            "| metric_view | better_direction | delta_linear_minus_cosine | winner | bootstrap_p05 | bootstrap_p95 | probability_linear_better |",
-            "| --- | --- | ---: | --- | ---: | ---: | ---: |",
+            "| metric_view | better_direction | cosine_value | linear_value | delta_linear_minus_cosine | winner | bootstrap_p05 | bootstrap_p95 | probability_linear_better |",
+            "| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: |",
         ]
         for row in comparison_rows:
             comparison_lines.append(
-                f"| {row['metric_view']} | {row['better_direction']} | {row['delta_linear_minus_cosine']} | {row['winner']} | {row['bootstrap_p05']} | {row['bootstrap_p95']} | {row['probability_linear_better']} |"
+                f"| {row['metric_view']} | {row['better_direction']} | {row['cosine_value']} | {row['linear_value']} | {row['delta_linear_minus_cosine']} | {row['winner']} | {row['bootstrap_p05']} | {row['bootstrap_p95']} | {row['probability_linear_better']} |"
             )
         delta = comparison_summary.get("delta") or {}
         comparison_lines.extend(

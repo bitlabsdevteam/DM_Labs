@@ -28,6 +28,36 @@ def _uniform_baseline_summary(vocab_size: Optional[int]) -> Dict[str, float]:
     }
 
 
+def _view_calibration(avg_cross_entropy: float, bits_per_masked_token: float, vocab_size: Optional[int]) -> Dict[str, float]:
+    if vocab_size is None or int(vocab_size) <= 0:
+        return {
+            "uniform_random_pseudo_perplexity": float("nan"),
+            "bits_saved_vs_uniform": float("nan"),
+            "denoising_skill": float("nan"),
+        }
+    if avg_cross_entropy is None or bits_per_masked_token is None:
+        return {
+            "uniform_random_pseudo_perplexity": float(vocab_size),
+            "bits_saved_vs_uniform": float("nan"),
+            "denoising_skill": float("nan"),
+        }
+    avg_cross_entropy = float(avg_cross_entropy)
+    bits_per_masked_token = float(bits_per_masked_token)
+    if math.isnan(avg_cross_entropy) or math.isnan(bits_per_masked_token):
+        return {
+            "uniform_random_pseudo_perplexity": float(vocab_size),
+            "bits_saved_vs_uniform": float("nan"),
+            "denoising_skill": float("nan"),
+        }
+    uniform_ce = math.log(float(vocab_size))
+    uniform_bits = uniform_ce / math.log(2.0)
+    return {
+        "uniform_random_pseudo_perplexity": float(vocab_size),
+        "bits_saved_vs_uniform": uniform_bits - bits_per_masked_token,
+        "denoising_skill": 1.0 - (avg_cross_entropy / uniform_ce),
+    }
+
+
 def _normalize_excluded_token_ids(excluded_token_ids: Optional[Sequence[Optional[int]]]) -> List[int]:
     if excluded_token_ids is None:
         return []
@@ -779,7 +809,7 @@ def _bootstrap_paired_comparison_interval(
     def _with_win_probability(metric_name: str, values: Sequence[float]) -> Dict[str, float]:
         if not values:
             return {**_metric_percentiles(values), "probability_linear_better": float("nan")}
-        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy", "grid_uniform_masked_token_accuracy", "timestep_macro_masked_token_accuracy", "timestep_auc_masked_token_accuracy"}
+        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy", "schedule_reweighted_masked_token_accuracy", "grid_uniform_masked_token_accuracy", "timestep_macro_masked_token_accuracy", "timestep_auc_masked_token_accuracy"}
         wins = sum(v > 0.0 for v in values) if higher_is_better else sum(v < 0.0 for v in values)
         return {**_metric_percentiles(values), "probability_linear_better": float(wins / len(values))}
 
@@ -1396,6 +1426,38 @@ def load_diffusion_checkpoint(artifact_dir, device, config_cls, model_cls):
     return model, cfg
 
 
+def _comparison_calibration_views(summary: Dict[str, object]) -> Dict[str, Dict[str, float]]:
+    vocab_size = summary.get("vocab_size")
+    return {
+        "sampled": _view_calibration(summary.get("avg_cross_entropy"), summary.get("bits_per_masked_token"), vocab_size),
+        "timestep_uniform": _view_calibration(
+            summary.get("timestep_uniform_avg_cross_entropy"),
+            summary.get("timestep_uniform_bits_per_masked_token"),
+            vocab_size,
+        ),
+        "schedule_reweighted": _view_calibration(
+            summary.get("schedule_reweighted_avg_cross_entropy"),
+            summary.get("schedule_reweighted_bits_per_masked_token"),
+            vocab_size,
+        ),
+        "grid_uniform": _view_calibration(
+            summary.get("grid_uniform_avg_cross_entropy"),
+            summary.get("grid_uniform_bits_per_masked_token"),
+            vocab_size,
+        ),
+        "timestep_macro": _view_calibration(
+            summary.get("timestep_macro_avg_cross_entropy"),
+            summary.get("timestep_macro_bits_per_masked_token"),
+            vocab_size,
+        ),
+        "timestep_auc": _view_calibration(
+            summary.get("timestep_auc_avg_cross_entropy"),
+            summary.get("timestep_auc_bits_per_masked_token"),
+            vocab_size,
+        ),
+    }
+
+
 def compare_schedule_checkpoints(
     cosine_dir,
     linear_dir,
@@ -1481,6 +1543,8 @@ def compare_schedule_checkpoints(
         cosine_metrics = {int(row.get("source_plan_timestep", row["timestep"])): row for row in models[0].get("timestep_metrics", [])}
         linear_metrics = {int(row.get("source_plan_timestep", row["timestep"])): row for row in models[1].get("timestep_metrics", [])}
         shared_timesteps = sorted(set(cosine_metrics) & set(linear_metrics))
+        cosine_calibration = _comparison_calibration_views(models[0])
+        linear_calibration = _comparison_calibration_views(models[1])
         comparison["delta"] = {
             "pseudo_perplexity": models[1]["pseudo_perplexity"] - models[0]["pseudo_perplexity"],
             "avg_cross_entropy": models[1]["avg_cross_entropy"] - models[0]["avg_cross_entropy"],
@@ -1488,6 +1552,7 @@ def compare_schedule_checkpoints(
             "masked_token_accuracy": models[1]["masked_token_accuracy"] - models[0]["masked_token_accuracy"],
             "timestep_uniform_pseudo_perplexity": models[1]["timestep_uniform_pseudo_perplexity"] - models[0]["timestep_uniform_pseudo_perplexity"],
             "timestep_uniform_avg_cross_entropy": models[1]["timestep_uniform_avg_cross_entropy"] - models[0]["timestep_uniform_avg_cross_entropy"],
+            "timestep_uniform_bits_per_masked_token": models[1]["timestep_uniform_bits_per_masked_token"] - models[0]["timestep_uniform_bits_per_masked_token"],
             "timestep_uniform_masked_token_accuracy": models[1]["timestep_uniform_masked_token_accuracy"] - models[0]["timestep_uniform_masked_token_accuracy"],
             "schedule_reweighted_pseudo_perplexity": models[1]["schedule_reweighted_pseudo_perplexity"] - models[0]["schedule_reweighted_pseudo_perplexity"],
             "schedule_reweighted_avg_cross_entropy": models[1]["schedule_reweighted_avg_cross_entropy"] - models[0]["schedule_reweighted_avg_cross_entropy"],
@@ -1495,6 +1560,7 @@ def compare_schedule_checkpoints(
             "schedule_reweighted_masked_token_accuracy": models[1]["schedule_reweighted_masked_token_accuracy"] - models[0]["schedule_reweighted_masked_token_accuracy"],
             "grid_uniform_pseudo_perplexity": models[1]["grid_uniform_pseudo_perplexity"] - models[0]["grid_uniform_pseudo_perplexity"],
             "grid_uniform_avg_cross_entropy": models[1]["grid_uniform_avg_cross_entropy"] - models[0]["grid_uniform_avg_cross_entropy"],
+            "grid_uniform_bits_per_masked_token": models[1]["grid_uniform_bits_per_masked_token"] - models[0]["grid_uniform_bits_per_masked_token"],
             "grid_uniform_masked_token_accuracy": models[1]["grid_uniform_masked_token_accuracy"] - models[0]["grid_uniform_masked_token_accuracy"],
             "timestep_macro_pseudo_perplexity": models[1]["timestep_macro_pseudo_perplexity"] - models[0]["timestep_macro_pseudo_perplexity"],
             "timestep_macro_avg_cross_entropy": models[1]["timestep_macro_avg_cross_entropy"] - models[0]["timestep_macro_avg_cross_entropy"],
@@ -1504,6 +1570,22 @@ def compare_schedule_checkpoints(
             "timestep_auc_avg_cross_entropy": models[1]["timestep_auc_avg_cross_entropy"] - models[0]["timestep_auc_avg_cross_entropy"],
             "timestep_auc_bits_per_masked_token": models[1]["timestep_auc_bits_per_masked_token"] - models[0]["timestep_auc_bits_per_masked_token"],
             "timestep_auc_masked_token_accuracy": models[1]["timestep_auc_masked_token_accuracy"] - models[0]["timestep_auc_masked_token_accuracy"],
+            "sampled_bits_saved_vs_uniform": linear_calibration["sampled"]["bits_saved_vs_uniform"] - cosine_calibration["sampled"]["bits_saved_vs_uniform"],
+            "sampled_denoising_skill": linear_calibration["sampled"]["denoising_skill"] - cosine_calibration["sampled"]["denoising_skill"],
+            "timestep_uniform_bits_saved_vs_uniform": linear_calibration["timestep_uniform"]["bits_saved_vs_uniform"] - cosine_calibration["timestep_uniform"]["bits_saved_vs_uniform"],
+            "timestep_uniform_denoising_skill": linear_calibration["timestep_uniform"]["denoising_skill"] - cosine_calibration["timestep_uniform"]["denoising_skill"],
+            "schedule_reweighted_bits_saved_vs_uniform": linear_calibration["schedule_reweighted"]["bits_saved_vs_uniform"] - cosine_calibration["schedule_reweighted"]["bits_saved_vs_uniform"],
+            "schedule_reweighted_denoising_skill": linear_calibration["schedule_reweighted"]["denoising_skill"] - cosine_calibration["schedule_reweighted"]["denoising_skill"],
+            "grid_uniform_bits_saved_vs_uniform": linear_calibration["grid_uniform"]["bits_saved_vs_uniform"] - cosine_calibration["grid_uniform"]["bits_saved_vs_uniform"],
+            "grid_uniform_denoising_skill": linear_calibration["grid_uniform"]["denoising_skill"] - cosine_calibration["grid_uniform"]["denoising_skill"],
+            "timestep_macro_bits_saved_vs_uniform": linear_calibration["timestep_macro"]["bits_saved_vs_uniform"] - cosine_calibration["timestep_macro"]["bits_saved_vs_uniform"],
+            "timestep_macro_denoising_skill": linear_calibration["timestep_macro"]["denoising_skill"] - cosine_calibration["timestep_macro"]["denoising_skill"],
+            "timestep_auc_bits_saved_vs_uniform": linear_calibration["timestep_auc"]["bits_saved_vs_uniform"] - cosine_calibration["timestep_auc"]["bits_saved_vs_uniform"],
+            "timestep_auc_denoising_skill": linear_calibration["timestep_auc"]["denoising_skill"] - cosine_calibration["timestep_auc"]["denoising_skill"],
+        }
+        comparison["calibration"] = {
+            "cosine_schedule": cosine_calibration,
+            "linear_schedule_baseline": linear_calibration,
         }
         comparison["winner"] = {
             "pseudo_perplexity": "cosine_schedule" if models[0]["pseudo_perplexity"] <= models[1]["pseudo_perplexity"] else "linear_schedule_baseline",
@@ -1511,12 +1593,14 @@ def compare_schedule_checkpoints(
             "masked_token_accuracy": "cosine_schedule" if models[0]["masked_token_accuracy"] >= models[1]["masked_token_accuracy"] else "linear_schedule_baseline",
             "timestep_uniform_pseudo_perplexity": "cosine_schedule" if models[0]["timestep_uniform_pseudo_perplexity"] <= models[1]["timestep_uniform_pseudo_perplexity"] else "linear_schedule_baseline",
             "timestep_uniform_avg_cross_entropy": "cosine_schedule" if models[0]["timestep_uniform_avg_cross_entropy"] <= models[1]["timestep_uniform_avg_cross_entropy"] else "linear_schedule_baseline",
+            "timestep_uniform_bits_per_masked_token": "cosine_schedule" if models[0]["timestep_uniform_bits_per_masked_token"] <= models[1]["timestep_uniform_bits_per_masked_token"] else "linear_schedule_baseline",
             "timestep_uniform_masked_token_accuracy": "cosine_schedule" if models[0]["timestep_uniform_masked_token_accuracy"] >= models[1]["timestep_uniform_masked_token_accuracy"] else "linear_schedule_baseline",
             "schedule_reweighted_pseudo_perplexity": "cosine_schedule" if models[0]["schedule_reweighted_pseudo_perplexity"] <= models[1]["schedule_reweighted_pseudo_perplexity"] else "linear_schedule_baseline",
             "schedule_reweighted_avg_cross_entropy": "cosine_schedule" if models[0]["schedule_reweighted_avg_cross_entropy"] <= models[1]["schedule_reweighted_avg_cross_entropy"] else "linear_schedule_baseline",
             "schedule_reweighted_masked_token_accuracy": "cosine_schedule" if models[0]["schedule_reweighted_masked_token_accuracy"] >= models[1]["schedule_reweighted_masked_token_accuracy"] else "linear_schedule_baseline",
             "grid_uniform_pseudo_perplexity": "cosine_schedule" if models[0]["grid_uniform_pseudo_perplexity"] <= models[1]["grid_uniform_pseudo_perplexity"] else "linear_schedule_baseline",
             "grid_uniform_avg_cross_entropy": "cosine_schedule" if models[0]["grid_uniform_avg_cross_entropy"] <= models[1]["grid_uniform_avg_cross_entropy"] else "linear_schedule_baseline",
+            "grid_uniform_bits_per_masked_token": "cosine_schedule" if models[0]["grid_uniform_bits_per_masked_token"] <= models[1]["grid_uniform_bits_per_masked_token"] else "linear_schedule_baseline",
             "grid_uniform_masked_token_accuracy": "cosine_schedule" if models[0]["grid_uniform_masked_token_accuracy"] >= models[1]["grid_uniform_masked_token_accuracy"] else "linear_schedule_baseline",
             "timestep_macro_pseudo_perplexity": "cosine_schedule" if models[0]["timestep_macro_pseudo_perplexity"] <= models[1]["timestep_macro_pseudo_perplexity"] else "linear_schedule_baseline",
             "timestep_macro_avg_cross_entropy": "cosine_schedule" if models[0]["timestep_macro_avg_cross_entropy"] <= models[1]["timestep_macro_avg_cross_entropy"] else "linear_schedule_baseline",
@@ -1524,6 +1608,18 @@ def compare_schedule_checkpoints(
             "timestep_auc_pseudo_perplexity": "cosine_schedule" if models[0]["timestep_auc_pseudo_perplexity"] <= models[1]["timestep_auc_pseudo_perplexity"] else "linear_schedule_baseline",
             "timestep_auc_avg_cross_entropy": "cosine_schedule" if models[0]["timestep_auc_avg_cross_entropy"] <= models[1]["timestep_auc_avg_cross_entropy"] else "linear_schedule_baseline",
             "timestep_auc_masked_token_accuracy": "cosine_schedule" if models[0]["timestep_auc_masked_token_accuracy"] >= models[1]["timestep_auc_masked_token_accuracy"] else "linear_schedule_baseline",
+            "sampled_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["sampled"]["bits_saved_vs_uniform"] >= linear_calibration["sampled"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
+            "sampled_denoising_skill": "cosine_schedule" if cosine_calibration["sampled"]["denoising_skill"] >= linear_calibration["sampled"]["denoising_skill"] else "linear_schedule_baseline",
+            "timestep_uniform_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["timestep_uniform"]["bits_saved_vs_uniform"] >= linear_calibration["timestep_uniform"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
+            "timestep_uniform_denoising_skill": "cosine_schedule" if cosine_calibration["timestep_uniform"]["denoising_skill"] >= linear_calibration["timestep_uniform"]["denoising_skill"] else "linear_schedule_baseline",
+            "schedule_reweighted_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["schedule_reweighted"]["bits_saved_vs_uniform"] >= linear_calibration["schedule_reweighted"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
+            "schedule_reweighted_denoising_skill": "cosine_schedule" if cosine_calibration["schedule_reweighted"]["denoising_skill"] >= linear_calibration["schedule_reweighted"]["denoising_skill"] else "linear_schedule_baseline",
+            "grid_uniform_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["grid_uniform"]["bits_saved_vs_uniform"] >= linear_calibration["grid_uniform"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
+            "grid_uniform_denoising_skill": "cosine_schedule" if cosine_calibration["grid_uniform"]["denoising_skill"] >= linear_calibration["grid_uniform"]["denoising_skill"] else "linear_schedule_baseline",
+            "timestep_macro_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["timestep_macro"]["bits_saved_vs_uniform"] >= linear_calibration["timestep_macro"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
+            "timestep_macro_denoising_skill": "cosine_schedule" if cosine_calibration["timestep_macro"]["denoising_skill"] >= linear_calibration["timestep_macro"]["denoising_skill"] else "linear_schedule_baseline",
+            "timestep_auc_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["timestep_auc"]["bits_saved_vs_uniform"] >= linear_calibration["timestep_auc"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
+            "timestep_auc_denoising_skill": "cosine_schedule" if cosine_calibration["timestep_auc"]["denoising_skill"] >= linear_calibration["timestep_auc"]["denoising_skill"] else "linear_schedule_baseline",
         }
         comparison["timestep_deltas"] = [
             {

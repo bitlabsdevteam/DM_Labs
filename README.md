@@ -39,6 +39,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - reusable Hugging Face model-card + upload helpers
   - persists `eval_summary.json` and `schedule_comparison.json` alongside uploaded artifacts
   - surfaces timestep-uniform, schedule-reweighted, grid-uniform, timestep-macro, and timestep-AUC evaluation views in exported model cards
+  - comparison tables now include per-view absolute cosine/linear values plus delta/winner metadata for pseudo-perplexity, bits-per-masked-token, calibration, and accuracy
 
 ## Project Focus
 
@@ -83,6 +84,7 @@ Current protocol improvements in the repo:
 - expose a **fixed-grid shared-timestep aggregate** plus paired uncertainty so cosine-vs-linear claims can be checked on an explicit common denoising surface
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts
 - calibrate denoising CE / pseudo-perplexity views against a same-tokenizer uniform-random baseline, exposing bits-saved and denoising-skill summaries in notebook/HF outputs
+- export side-by-side cosine-vs-linear absolute values for each comparison view, so HF cards show both the winner and the actual metric scale behind that winner
 - surface when normalized timestep remapping was used in cross-checkpoint comparisons and Hugging Face artifacts
 
 ## Current Notebook Capabilities
