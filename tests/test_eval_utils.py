@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from dm_labs.eval_utils import build_eval_plan, compare_schedule_checkpoints, evaluate_diffusion_pseudo_perplexity_from_plan
+from dm_labs.eval_utils import build_eval_plan, compare_schedule_checkpoints, evaluate_diffusion_pseudo_perplexity_from_plan, export_eval_plan, load_eval_plan
 from dm_labs.modeling import DiffusionLMConfig, DiffusionTransformerLM
 
 
@@ -118,10 +118,63 @@ class EvalPlanRemapTests(unittest.TestCase):
         reweighted_ci = result["schedule_reweighted_confidence_intervals"]
         self.assertIn("schedule_reweighted_pseudo_perplexity", reweighted_ci)
         self.assertIn("schedule_reweighted_masked_token_accuracy", reweighted_ci)
+        self.assertEqual(result["schedule_reweighted_nonzero_examples"], 0)
+        self.assertTrue(torch.isnan(torch.tensor(result["schedule_reweighted_effective_sample_size"])).item())
+        self.assertTrue(torch.isnan(torch.tensor(result["schedule_reweighted_effective_sample_size_fraction"])).item())
         timestep_ci = result["timestep_confidence_intervals"]
         self.assertEqual(timestep_ci["n_timesteps"], 3)
         self.assertIn("timestep_macro_pseudo_perplexity", timestep_ci)
         self.assertIn("timestep_auc_pseudo_perplexity", timestep_ci)
+
+
+    def test_schedule_reweighted_diagnostics_track_effective_sample_size(self):
+        plan = {
+            "n_batches": 1,
+            "seed": 0,
+            "T": 10,
+            "timestep_grid": [],
+            "batches": [
+                {
+                    "input_ids": torch.tensor([[1, 2, 3, 4], [4, 5, 6, 7]], dtype=torch.long),
+                    "attention_mask": torch.ones((2, 4), dtype=torch.long),
+                    "active_tokens": 8,
+                    "timestep_plans": [
+                        {"kind": "sampled", "t": torch.tensor([2, 10]), "u": torch.tensor([0.2, 1.0]), "rand": torch.zeros((2, 4))},
+                    ],
+                }
+            ],
+        }
+        model = ConstantLogitModel(vocab_size=8)
+
+        def corruption_fn(input_ids, attention_mask, t, mask_token_id, T, excluded_token_ids=None, rand=None, generator=None):
+            labels = input_ids.clone()
+            mask_positions = torch.ones_like(input_ids, dtype=torch.bool)
+            noisy = torch.full_like(input_ids, mask_token_id)
+            return noisy, labels, mask_positions
+
+        result = evaluate_diffusion_pseudo_perplexity_from_plan(
+            model=model,
+            eval_plan=plan,
+            corruption_fn=corruption_fn,
+            mask_token_id=0,
+            T=10,
+            schedule_name="linear",
+            bootstrap_samples=8,
+        )
+        self.assertEqual(result["schedule_reweighted_nonzero_examples"], 2)
+        self.assertAlmostEqual(result["schedule_reweighted_estimated_eligible_token_count"], 24.0, places=6)
+        self.assertAlmostEqual(result["schedule_reweighted_effective_sample_size"], 36.0 / 26.0, places=6)
+        self.assertAlmostEqual(result["schedule_reweighted_effective_sample_size_fraction"], (36.0 / 26.0) / 2.0, places=6)
+
+    def test_export_and_reload_eval_plan_round_trips(self):
+        plan = build_eval_plan([self.batch], T=10, n_batches=1, timestep_grid=[5, 10], seed=0)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = export_eval_plan(Path(tmpdir) / "eval_plan.pt", plan)
+            reloaded = load_eval_plan(out["path"])
+        self.assertEqual(out["n_batches"], 1)
+        self.assertEqual(out["T"], 10)
+        self.assertEqual(reloaded["timestep_grid"], [5, 10])
+        self.assertTrue(torch.equal(reloaded["batches"][0]["input_ids"], plan["batches"][0]["input_ids"]))
 
 
 class ScheduleComparisonRemapTests(unittest.TestCase):

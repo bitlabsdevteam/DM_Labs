@@ -49,6 +49,7 @@ EVAL_VIEW_SPECS = [
         "bits_key": "bits_per_masked_token",
         "accuracy_key": "masked_token_accuracy",
         "ci_container_key": "confidence_intervals",
+        "ci_ce_key": "avg_cross_entropy",
         "ci_metric_key": "pseudo_perplexity",
         "ci_accuracy_key": "masked_token_accuracy",
         "aggregation": "token-weighted over sampled masked tokens",
@@ -60,6 +61,7 @@ EVAL_VIEW_SPECS = [
         "bits_key": "timestep_uniform_bits_per_masked_token",
         "accuracy_key": "timestep_uniform_masked_token_accuracy",
         "ci_container_key": "timestep_uniform_confidence_intervals",
+        "ci_ce_key": "timestep_uniform_avg_cross_entropy",
         "ci_metric_key": "timestep_uniform_pseudo_perplexity",
         "ci_accuracy_key": "timestep_uniform_masked_token_accuracy",
         "aggregation": "uniform mean over sampled per-example timesteps",
@@ -71,6 +73,7 @@ EVAL_VIEW_SPECS = [
         "bits_key": "schedule_reweighted_bits_per_masked_token",
         "accuracy_key": "schedule_reweighted_masked_token_accuracy",
         "ci_container_key": "schedule_reweighted_confidence_intervals",
+        "ci_ce_key": "schedule_reweighted_avg_cross_entropy",
         "ci_metric_key": "schedule_reweighted_pseudo_perplexity",
         "ci_accuracy_key": "schedule_reweighted_masked_token_accuracy",
         "aggregation": "inverse-expected-mask-ratio weighting over sampled masked tokens",
@@ -82,6 +85,7 @@ EVAL_VIEW_SPECS = [
         "bits_key": "grid_uniform_bits_per_masked_token",
         "accuracy_key": "grid_uniform_masked_token_accuracy",
         "ci_container_key": "grid_uniform_confidence_intervals",
+        "ci_ce_key": "grid_uniform_avg_cross_entropy",
         "ci_metric_key": "grid_uniform_pseudo_perplexity",
         "ci_accuracy_key": "grid_uniform_masked_token_accuracy",
         "aggregation": "uniform mean over cached batch-timestep records on the fixed grid",
@@ -93,6 +97,7 @@ EVAL_VIEW_SPECS = [
         "bits_key": "timestep_macro_bits_per_masked_token",
         "accuracy_key": "timestep_macro_masked_token_accuracy",
         "ci_container_key": "timestep_confidence_intervals",
+        "ci_ce_key": "timestep_macro_avg_cross_entropy",
         "ci_metric_key": "timestep_macro_pseudo_perplexity",
         "ci_accuracy_key": "timestep_macro_masked_token_accuracy",
         "aggregation": "uniform mean over token-weighted per-timestep metrics on the fixed grid",
@@ -104,6 +109,7 @@ EVAL_VIEW_SPECS = [
         "bits_key": "timestep_auc_bits_per_masked_token",
         "accuracy_key": "timestep_auc_masked_token_accuracy",
         "ci_container_key": "timestep_confidence_intervals",
+        "ci_ce_key": "timestep_auc_avg_cross_entropy",
         "ci_metric_key": "timestep_auc_pseudo_perplexity",
         "ci_accuracy_key": "timestep_auc_masked_token_accuracy",
         "aggregation": "normalized trapezoid integral over token-weighted per-timestep metrics on the fixed grid",
@@ -392,6 +398,36 @@ def _extract_ci(summary: Optional[dict], container_key: Optional[str], metric_ke
     return (summary.get(container_key) or {}).get(metric_key) or {}
 
 
+def _calibration_interval_from_ce_ci(ce_ci: dict, vocab_size: Optional[int]) -> dict:
+    if vocab_size is None or int(vocab_size) <= 0 or not ce_ci:
+        return {}
+    ce_p05 = ce_ci.get("p05")
+    ce_p95 = ce_ci.get("p95")
+    if ce_p05 is None or ce_p95 is None:
+        return {}
+    try:
+        ce_p05 = float(ce_p05)
+        ce_p95 = float(ce_p95)
+    except (TypeError, ValueError):
+        return {}
+    if math.isnan(ce_p05) or math.isnan(ce_p95):
+        return {
+            "bits_saved_vs_uniform_ci_p05": float("nan"),
+            "bits_saved_vs_uniform_ci_p95": float("nan"),
+            "denoising_skill_ci_p05": float("nan"),
+            "denoising_skill_ci_p95": float("nan"),
+        }
+
+    uniform_ce = math.log(float(vocab_size))
+    uniform_bits = uniform_ce / math.log(2.0)
+    return {
+        "bits_saved_vs_uniform_ci_p05": uniform_bits - (ce_p95 / math.log(2.0)),
+        "bits_saved_vs_uniform_ci_p95": uniform_bits - (ce_p05 / math.log(2.0)),
+        "denoising_skill_ci_p05": 1.0 - (ce_p95 / uniform_ce),
+        "denoising_skill_ci_p95": 1.0 - (ce_p05 / uniform_ce),
+    }
+
+
 def build_eval_view_rows(eval_summary: Optional[dict] = None) -> list:
     if not eval_summary:
         return []
@@ -401,6 +437,7 @@ def build_eval_view_rows(eval_summary: Optional[dict] = None) -> list:
     for spec in EVAL_VIEW_SPECS:
         metric_ci = _extract_ci(eval_summary, spec["ci_container_key"], spec["ci_metric_key"])
         accuracy_ci = _extract_ci(eval_summary, spec["ci_container_key"], spec["ci_accuracy_key"])
+        ce_ci = _extract_ci(eval_summary, spec["ci_container_key"], spec.get("ci_ce_key"))
         avg_cross_entropy = eval_summary.get(spec["avg_cross_entropy_key"])
         bits_per_masked_token = eval_summary.get(spec["bits_key"])
         rows.append(
@@ -412,6 +449,7 @@ def build_eval_view_rows(eval_summary: Optional[dict] = None) -> list:
                 "bits_per_masked_token": bits_per_masked_token,
                 "masked_token_accuracy": eval_summary.get(spec["accuracy_key"]),
                 **_view_calibration(avg_cross_entropy, bits_per_masked_token, vocab_size),
+                **_calibration_interval_from_ce_ci(ce_ci, vocab_size),
                 "pseudo_perplexity_ci_p05": metric_ci.get("p05"),
                 "pseudo_perplexity_ci_p95": metric_ci.get("p95"),
                 "masked_token_accuracy_ci_p05": accuracy_ci.get("p05"),
@@ -485,6 +523,55 @@ def write_schedule_comparison(local_artifact_dir: str, comparison_summary: Optio
     return str(out_path)
 
 
+def write_eval_plan(local_artifact_dir: str, eval_plan=None) -> Optional[str]:
+    if eval_plan is None:
+        return None
+    local_artifact_dir = Path(local_artifact_dir)
+    out_path = local_artifact_dir / "eval_plan.pt"
+    import torch
+
+    torch.save(eval_plan, out_path)
+    return str(out_path)
+
+
+def write_hf_export_bundle(
+    local_artifact_dir: str,
+    repo_id: str,
+    *,
+    eval_summary: Optional[dict] = None,
+    comparison_summary: Optional[dict] = None,
+    eval_plan=None,
+    overwrite_model_card: bool = False,
+) -> dict:
+    local_artifact_dir = Path(local_artifact_dir)
+    local_artifact_dir.mkdir(parents=True, exist_ok=True)
+    eval_summary_path = write_eval_summary(local_artifact_dir, eval_summary=eval_summary)
+    comparison_path = write_schedule_comparison(local_artifact_dir, comparison_summary=comparison_summary)
+    eval_plan_path = write_eval_plan(local_artifact_dir, eval_plan=eval_plan)
+    readme_path = ensure_hf_model_card(
+        local_artifact_dir,
+        repo_id,
+        eval_summary=eval_summary,
+        comparison_summary=comparison_summary,
+        overwrite=overwrite_model_card,
+    )
+    manifest = {
+        "repo_id": repo_id,
+        "local_artifact_dir": str(local_artifact_dir),
+        "readme_path": readme_path,
+        "eval_summary_path": eval_summary_path,
+        "comparison_summary_path": comparison_path,
+        "eval_plan_path": eval_plan_path,
+        "has_eval_summary": eval_summary is not None,
+        "has_comparison_summary": comparison_summary is not None,
+        "has_eval_plan": eval_plan is not None,
+    }
+    manifest_path = local_artifact_dir / "hf_export_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    manifest["manifest_path"] = str(manifest_path)
+    return manifest
+
+
 def ensure_hf_model_card(
     local_artifact_dir: str,
     repo_id: str,
@@ -504,12 +591,12 @@ def ensure_hf_model_card(
         eval_rows = build_eval_view_rows(eval_summary)
         metrics_lines = [
             "\n## Evaluation summary\n",
-            "| view | aggregation | avg_cross_entropy | pseudo_perplexity | uniform_random_pseudo_perplexity | bits_per_masked_token | bits_saved_vs_uniform | denoising_skill | masked_token_accuracy | pseudo_perplexity_ci_p05 | pseudo_perplexity_ci_p95 | accuracy_ci_p05 | accuracy_ci_p95 |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| view | aggregation | avg_cross_entropy | pseudo_perplexity | uniform_random_pseudo_perplexity | bits_per_masked_token | bits_saved_vs_uniform | bits_saved_ci_p05 | bits_saved_ci_p95 | denoising_skill | denoising_skill_ci_p05 | denoising_skill_ci_p95 | masked_token_accuracy | pseudo_perplexity_ci_p05 | pseudo_perplexity_ci_p95 | accuracy_ci_p05 | accuracy_ci_p95 |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
         for row in eval_rows:
             metrics_lines.append(
-                f"| {row['view']} | {row['aggregation']} | {row['avg_cross_entropy']} | {row['pseudo_perplexity']} | {row['uniform_random_pseudo_perplexity']} | {row['bits_per_masked_token']} | {row['bits_saved_vs_uniform']} | {row['denoising_skill']} | {row['masked_token_accuracy']} | {row['pseudo_perplexity_ci_p05']} | {row['pseudo_perplexity_ci_p95']} | {row['masked_token_accuracy_ci_p05']} | {row['masked_token_accuracy_ci_p95']} |"
+                f"| {row['view']} | {row['aggregation']} | {row['avg_cross_entropy']} | {row['pseudo_perplexity']} | {row['uniform_random_pseudo_perplexity']} | {row['bits_per_masked_token']} | {row['bits_saved_vs_uniform']} | {row.get('bits_saved_vs_uniform_ci_p05')} | {row.get('bits_saved_vs_uniform_ci_p95')} | {row['denoising_skill']} | {row.get('denoising_skill_ci_p05')} | {row.get('denoising_skill_ci_p95')} | {row['masked_token_accuracy']} | {row['pseudo_perplexity_ci_p05']} | {row['pseudo_perplexity_ci_p95']} | {row['masked_token_accuracy_ci_p05']} | {row['masked_token_accuracy_ci_p95']} |"
             )
         metrics_lines.extend(
             [
@@ -522,6 +609,10 @@ def ensure_hf_model_card(
                 f"- sampled_example_count: {eval_summary.get('sampled_example_count')}",
                 f"- masked_tokens: {eval_summary.get('masked_tokens')}",
                 f"- n_batches: {eval_summary.get('n_batches')}",
+                f"- schedule_reweighted_nonzero_examples: {eval_summary.get('schedule_reweighted_nonzero_examples')}",
+                f"- schedule_reweighted_estimated_eligible_token_count: {eval_summary.get('schedule_reweighted_estimated_eligible_token_count')}",
+                f"- schedule_reweighted_effective_sample_size: {eval_summary.get('schedule_reweighted_effective_sample_size')}",
+                f"- schedule_reweighted_effective_sample_size_fraction: {eval_summary.get('schedule_reweighted_effective_sample_size_fraction')}",
                 f"- timestep_macro_timestep_count: {eval_summary.get('timestep_macro_timestep_count')}",
                 f"- timestep_auc_timestep_count: {eval_summary.get('timestep_auc_timestep_count')}",
                 f"- timestep_auc_fraction_span: {eval_summary.get('timestep_auc_fraction_span')}",
@@ -595,6 +686,8 @@ This model repo contains artifacts exported from the DM_Labs notebook for a disc
 - tokenizer files
 - optional `eval_summary.json`
 - optional `schedule_comparison.json`
+- optional `eval_plan.pt` shared cached evaluation plan artifact
+- optional `hf_export_manifest.json` bundle manifest covering all exported metadata files
 - optional schedule-comparison JSON artifacts
 {metrics_block}{protocol_block}{comparison_block}## Evaluation note
 
@@ -602,7 +695,7 @@ The reported pseudo-perplexity is based on masked-token denoising NLL under a di
 
 To make the pseudo-perplexity-style views easier to interpret, the exported tables also calibrate each aggregate against a same-vocabulary uniform-random baseline, exposing `bits_saved_vs_uniform` and `denoising_skill = 1 - CE / log(|V|)`.
 
-For reproducibility, the notebook can export the exact evaluation summary used for this upload into `eval_summary.json` and the paired linear-vs-cosine summary into `schedule_comparison.json`.
+For reproducibility, the notebook can export the exact evaluation summary used for this upload into `eval_summary.json`, the paired linear-vs-cosine summary into `schedule_comparison.json`, and the shared cached batch/timestep/noise plan into `eval_plan.pt`.
 """,
         encoding="utf-8",
     )
@@ -618,6 +711,7 @@ def upload_checkpoint_to_hub(
     private: bool = False,
     eval_summary: Optional[dict] = None,
     comparison_summary: Optional[dict] = None,
+    eval_plan=None,
     overwrite_model_card: bool = False,
     commit_message: str = "Upload DM_Labs diffusion LM artifacts",
 ) -> str:
@@ -632,14 +726,13 @@ def upload_checkpoint_to_hub(
             raise ValueError("Set HF_USERNAME or HF_REPO_ID before uploading to Hugging Face Hub.")
         hf_repo_id = f"{hf_username}/tinystories-diffusion-lm"
 
-    write_eval_summary(local_artifact_dir, eval_summary=eval_summary)
-    write_schedule_comparison(local_artifact_dir, comparison_summary=comparison_summary)
-    ensure_hf_model_card(
+    write_hf_export_bundle(
         local_artifact_dir,
         hf_repo_id,
         eval_summary=eval_summary,
         comparison_summary=comparison_summary,
-        overwrite=overwrite_model_card,
+        eval_plan=eval_plan,
+        overwrite_model_card=overwrite_model_card,
     )
 
     from huggingface_hub import create_repo, login, upload_folder

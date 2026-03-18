@@ -997,6 +997,10 @@ def _empty_eval_result(
         "schedule_reweighted_pseudo_perplexity": float("nan"),
         "schedule_reweighted_bits_per_masked_token": float("nan"),
         "schedule_reweighted_masked_token_accuracy": float("nan"),
+        "schedule_reweighted_effective_sample_size": float("nan"),
+        "schedule_reweighted_effective_sample_size_fraction": float("nan"),
+        "schedule_reweighted_nonzero_examples": 0,
+        "schedule_reweighted_estimated_eligible_token_count": 0.0,
         "timestep_uniform_confidence_intervals": _bootstrap_example_uniform_metric_interval([], n_samples=0, seed=seed),
         "grid_uniform_avg_cross_entropy": float("nan"),
         "grid_uniform_pseudo_perplexity": float("nan"),
@@ -1062,6 +1066,8 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
     schedule_reweighted_nll_sum = 0.0
     schedule_reweighted_masked_tokens = 0.0
     schedule_reweighted_correct = 0.0
+    schedule_reweighted_token_masses: List[float] = []
+    schedule_reweighted_nonzero_examples = 0
     timestep_records: Dict[int, Dict[str, float]] = {}
     sampled_batch_metrics: List[Dict[str, float]] = []
     sampled_example_metrics: List[Dict[str, float]] = []
@@ -1145,9 +1151,12 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                         expected_mask_ratio = float(schedule_fn(eval_t[example_idx:example_idx + 1], T).item())
                         if expected_mask_ratio > 0.0:
                             schedule_reweighted_weight = 1.0 / expected_mask_ratio
+                            weighted_token_mass = example_masked_tokens * schedule_reweighted_weight
                             schedule_reweighted_nll_sum += example_nll_sum * schedule_reweighted_weight
-                            schedule_reweighted_masked_tokens += example_masked_tokens * schedule_reweighted_weight
+                            schedule_reweighted_masked_tokens += weighted_token_mass
                             schedule_reweighted_correct += example_correct * schedule_reweighted_weight
+                            schedule_reweighted_token_masses.append(float(weighted_token_mass))
+                            schedule_reweighted_nonzero_examples += 1
                     sampled_example_metrics.append(
                         {
                             "batch_index": batch_idx,
@@ -1261,6 +1270,25 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         else:
             schedule_reweighted_avg_ce = float("nan")
             schedule_reweighted_masked_token_accuracy = float("nan")
+
+        if schedule_reweighted_token_masses:
+            schedule_reweighted_mass_sum = float(sum(schedule_reweighted_token_masses))
+            schedule_reweighted_mass_sq_sum = float(sum(mass * mass for mass in schedule_reweighted_token_masses))
+            schedule_reweighted_effective_sample_size = (
+                (schedule_reweighted_mass_sum * schedule_reweighted_mass_sum) / schedule_reweighted_mass_sq_sum
+                if schedule_reweighted_mass_sq_sum > 0.0
+                else float("nan")
+            )
+            schedule_reweighted_effective_sample_size_fraction = (
+                schedule_reweighted_effective_sample_size / float(len(schedule_reweighted_token_masses))
+                if schedule_reweighted_token_masses
+                else float("nan")
+            )
+        else:
+            schedule_reweighted_mass_sum = 0.0
+            schedule_reweighted_effective_sample_size = float("nan")
+            schedule_reweighted_effective_sample_size_fraction = float("nan")
+
         if grid_batch_metrics:
             grid_uniform_avg_ce = sum(float(row["avg_cross_entropy"]) for row in grid_batch_metrics) / len(grid_batch_metrics)
             grid_uniform_masked_token_accuracy = sum(float(row["masked_token_accuracy"]) for row in grid_batch_metrics) / len(grid_batch_metrics)
@@ -1305,6 +1333,10 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             "schedule_reweighted_pseudo_perplexity": _safe_exp(schedule_reweighted_avg_ce),
             "schedule_reweighted_bits_per_masked_token": schedule_reweighted_avg_ce / math.log(2.0) if not math.isnan(schedule_reweighted_avg_ce) else float("nan"),
             "schedule_reweighted_masked_token_accuracy": schedule_reweighted_masked_token_accuracy,
+            "schedule_reweighted_effective_sample_size": schedule_reweighted_effective_sample_size,
+            "schedule_reweighted_effective_sample_size_fraction": schedule_reweighted_effective_sample_size_fraction,
+            "schedule_reweighted_nonzero_examples": schedule_reweighted_nonzero_examples,
+            "schedule_reweighted_estimated_eligible_token_count": schedule_reweighted_mass_sum,
             "grid_uniform_avg_cross_entropy": grid_uniform_avg_ce,
             "grid_uniform_pseudo_perplexity": _safe_exp(grid_uniform_avg_ce),
             "grid_uniform_bits_per_masked_token": grid_uniform_avg_ce / math.log(2.0) if not math.isnan(grid_uniform_avg_ce) else float("nan"),
@@ -1353,6 +1385,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
                 "Timestep-uniform CE averages per-example masked-token CE over uniformly sampled timesteps, making schedule comparisons less sensitive to different mask-count profiles.",
                 "Schedule-reweighted CE applies inverse expected mask-ratio weights to sampled masked tokens, estimating a uniform-over-mask-eligible-token-and-timestep denoising objective directly from sampled batches.",
+                "Schedule-reweighted diagnostics expose an importance-sampling effective sample size (ESS), so users can tell when inverse-mask-ratio weighting becomes statistically fragile.",
                 "Grid-uniform CE averages batch-level denoising CE over a fixed cached timestep grid, giving an explicit schedule-agnostic comparison surface.",
                 "Timestep-macro CE averages token-weighted per-timestep denoising CE equally over the explicit diagnostic grid, making each denoising stage contribute the same top-level weight.",
                 "Timestep-AUC CE integrates token-weighted per-timestep CE over normalized timestep fraction with trapezoidal weighting, so irregular diagnostic grids do not silently over-weight dense regions.",
@@ -1664,6 +1697,23 @@ def export_eval_result(path, tag: str, result: Dict[str, object]) -> Dict[str, o
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return payload
+
+
+def export_eval_plan(path, eval_plan: Dict[str, object]) -> Dict[str, object]:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(eval_plan, path)
+    return {
+        "path": str(path),
+        "n_batches": int(eval_plan.get("n_batches", 0)),
+        "T": int(eval_plan.get("T", 0)),
+        "timestep_grid": list(eval_plan.get("timestep_grid", [])),
+        "seed": int(eval_plan.get("seed", 0)),
+    }
+
+
+def load_eval_plan(path) -> Dict[str, object]:
+    return torch.load(Path(path), map_location="cpu")
 
 
 def export_schedule_comparison(path, comparison: Dict[str, object]) -> Dict[str, object]:

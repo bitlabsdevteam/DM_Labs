@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dm_labs.hf_utils import build_eval_view_rows, build_schedule_comparison_rows, ensure_hf_model_card
+from dm_labs.hf_utils import build_eval_view_rows, build_schedule_comparison_rows, ensure_hf_model_card, write_eval_plan, write_hf_export_bundle
 
 
 class HuggingFaceModelCardTests(unittest.TestCase):
@@ -40,26 +40,36 @@ class HuggingFaceModelCardTests(unittest.TestCase):
             "sampled_example_count": 12,
             "masked_tokens": 48,
             "n_batches": 3,
+            "schedule_reweighted_nonzero_examples": 12,
+            "schedule_reweighted_estimated_eligible_token_count": 60.0,
+            "schedule_reweighted_effective_sample_size": 10.5,
+            "schedule_reweighted_effective_sample_size_fraction": 0.875,
             "timestep_macro_timestep_count": 5,
             "timestep_auc_timestep_count": 5,
             "timestep_auc_fraction_span": 1.0,
             "confidence_intervals": {
+                "avg_cross_entropy": {"p05": 0.9, "p95": 1.1},
                 "pseudo_perplexity": {"p05": 1.8, "p95": 2.2},
                 "masked_token_accuracy": {"p05": 0.3, "p95": 0.5},
             },
             "timestep_uniform_confidence_intervals": {
+                "timestep_uniform_avg_cross_entropy": {"p05": 1.0, "p95": 1.2},
                 "timestep_uniform_pseudo_perplexity": {"p05": 1.9, "p95": 2.3},
                 "timestep_uniform_masked_token_accuracy": {"p05": 0.31, "p95": 0.51},
             },
             "schedule_reweighted_confidence_intervals": {
+                "schedule_reweighted_avg_cross_entropy": {"p05": 1.1, "p95": 1.3},
                 "schedule_reweighted_pseudo_perplexity": {"p05": 2.0, "p95": 2.4},
                 "schedule_reweighted_masked_token_accuracy": {"p05": 0.32, "p95": 0.52},
             },
             "grid_uniform_confidence_intervals": {
+                "grid_uniform_avg_cross_entropy": {"p05": 1.2, "p95": 1.4},
                 "grid_uniform_pseudo_perplexity": {"p05": 2.1, "p95": 2.5},
                 "grid_uniform_masked_token_accuracy": {"p05": 0.33, "p95": 0.53},
             },
             "timestep_confidence_intervals": {
+                "timestep_macro_avg_cross_entropy": {"p05": 1.3, "p95": 1.5},
+                "timestep_auc_avg_cross_entropy": {"p05": 1.4, "p95": 1.6},
                 "timestep_macro_pseudo_perplexity": {"p05": 2.2, "p95": 2.6},
                 "timestep_auc_pseudo_perplexity": {"p05": 2.3, "p95": 2.7},
                 "timestep_macro_masked_token_accuracy": {"p05": 0.34, "p95": 0.54},
@@ -249,6 +259,10 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertAlmostEqual(eval_rows[0]["denoising_skill"], 1.0 - (1.0 / 2.772588722239781), places=6)
         self.assertEqual(eval_rows[0]["pseudo_perplexity_ci_p05"], 1.8)
         self.assertEqual(eval_rows[0]["masked_token_accuracy_ci_p95"], 0.5)
+        self.assertAlmostEqual(eval_rows[0]["bits_saved_vs_uniform_ci_p05"], 4.0 - (1.1 / 0.6931471805599453), places=6)
+        self.assertAlmostEqual(eval_rows[0]["bits_saved_vs_uniform_ci_p95"], 4.0 - (0.9 / 0.6931471805599453), places=6)
+        self.assertAlmostEqual(eval_rows[0]["denoising_skill_ci_p05"], 1.0 - (1.1 / 2.772588722239781), places=6)
+        self.assertAlmostEqual(eval_rows[0]["denoising_skill_ci_p95"], 1.0 - (0.9 / 2.772588722239781), places=6)
         self.assertEqual(eval_rows[1]["pseudo_perplexity_ci_p05"], 1.9)
         self.assertEqual(eval_rows[1]["masked_token_accuracy_ci_p95"], 0.51)
         self.assertEqual(eval_rows[2]["aggregation"], "inverse-expected-mask-ratio weighting over sampled masked tokens")
@@ -267,6 +281,18 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertEqual(comparison_rows[-1]["probability_linear_better"], 0.15)
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            eval_plan_path = write_eval_plan(tmpdir, eval_plan={"n_batches": 3, "T": 64, "timestep_grid": [1, 16, 32, 48, 64], "seed": 7, "batches": []})
+            self.assertTrue(Path(eval_plan_path).exists())
+            bundle = write_hf_export_bundle(
+                tmpdir,
+                repo_id="bitlabsdevteam/dm-labs-test",
+                eval_summary=eval_summary,
+                comparison_summary=comparison_summary,
+                eval_plan={"n_batches": 3, "T": 64, "timestep_grid": [1, 16, 32, 48, 64], "seed": 7, "batches": []},
+                overwrite_model_card=True,
+            )
+            self.assertTrue(Path(bundle["manifest_path"]).exists())
+            self.assertTrue(Path(bundle["eval_plan_path"]).exists())
             card_path = ensure_hf_model_card(
                 tmpdir,
                 repo_id="bitlabsdevteam/dm-labs-test",
@@ -276,10 +302,15 @@ class HuggingFaceModelCardTests(unittest.TestCase):
             )
             content = Path(card_path).read_text(encoding="utf-8")
 
-        self.assertIn("| timestep_uniform_sampled | uniform mean over sampled per-example timesteps | 1.1 | 2.1 | 16.0 | 3.1 | 0.8999999999999999 | 0.603258863755535 | 0.41 | 1.9 | 2.3 | 0.31 | 0.51 |", content)
-        self.assertIn("| schedule_reweighted_sampled | inverse-expected-mask-ratio weighting over sampled masked tokens | 1.2 | 2.2 | 16.0 | 3.2 | 0.7999999999999998 | 0.567191487733311 | 0.42 | 2.0 | 2.4 | 0.32 | 0.52 |", content)
+        self.assertIn("| timestep_uniform_sampled | uniform mean over sampled per-example timesteps | 1.1 | 2.1 | 16.0 | 3.1 | 0.8999999999999999 |", content)
+        self.assertIn("| schedule_reweighted_sampled | inverse-expected-mask-ratio weighting over sampled masked tokens | 1.2 | 2.2 | 16.0 | 3.2 | 0.7999999999999998 |", content)
+        self.assertIn("| token_weighted_sampled | token-weighted over sampled masked tokens | 1.0 | 2.0 | 16.0 | 3.0 | 1.0 |", content)
         self.assertIn("- uniform_random_pseudo_perplexity: 16.0", content)
+        self.assertIn("- schedule_reweighted_nonzero_examples: 12", content)
+        self.assertIn("- schedule_reweighted_effective_sample_size: 10.5", content)
         self.assertIn("- schedule_reweighted_aggregation: inverse_expected_mask_ratio_weighting_over_sampled_masked_tokens", content)
+        self.assertIn("- optional `eval_plan.pt` shared cached evaluation plan artifact", content)
+        self.assertIn("- optional `hf_export_manifest.json` bundle manifest covering all exported metadata files", content)
         self.assertIn("| schedule_reweighted_pseudo_perplexity | lower | 2.2 | 2.32 | 0.12 | cosine_schedule | -0.08 | 0.32 | 0.22 |", content)
         self.assertIn("| timestep_uniform_accuracy | higher | 0.41 | 0.389 | -0.021 | cosine_schedule | -0.041 | 0.001 | 0.11 |", content)
         self.assertIn("| timestep_auc_bits_saved_vs_uniform | higher | 0.5 | 0.482 | -0.018 | cosine_schedule | None | None | None |", content)
