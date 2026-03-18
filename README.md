@@ -40,6 +40,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - persists `eval_summary.json` and `schedule_comparison.json` alongside uploaded artifacts
   - surfaces timestep-uniform, schedule-reweighted, grid-uniform, timestep-macro, and timestep-AUC evaluation views in exported model cards
   - comparison tables now include per-view absolute cosine/linear values plus delta/winner metadata for pseudo-perplexity, bits-per-masked-token, calibration, and accuracy
+  - paired bootstrap confidence intervals now also cover calibration deltas (`bits_saved_vs_uniform`, `denoising_skill`) in linear-vs-cosine comparisons, not just CE/PPX/accuracy
 
 ## Project Focus
 

@@ -169,21 +169,33 @@ class HuggingFaceModelCardTests(unittest.TestCase):
                 "delta_linear_minus_cosine": {
                     "pseudo_perplexity": {"p05": -0.1, "p95": 0.3, "probability_linear_better": 0.2},
                     "bits_per_masked_token": {"p05": -0.02, "p95": 0.05, "probability_linear_better": 0.2},
+                    "sampled_bits_saved_vs_uniform": {"p05": -0.05, "p95": 0.02, "probability_linear_better": 0.8},
+                    "sampled_denoising_skill": {"p05": -0.018, "p95": 0.007, "probability_linear_better": 0.8},
                     "masked_token_accuracy": {"p05": -0.04, "p95": 0.0, "probability_linear_better": 0.1},
                     "timestep_uniform_pseudo_perplexity": {"p05": -0.09, "p95": 0.31, "probability_linear_better": 0.21},
                     "timestep_uniform_bits_per_masked_token": {"p05": -0.021, "p95": 0.051, "probability_linear_better": 0.21},
+                    "timestep_uniform_bits_saved_vs_uniform": {"p05": -0.051, "p95": 0.021, "probability_linear_better": 0.79},
+                    "timestep_uniform_denoising_skill": {"p05": -0.019, "p95": 0.008, "probability_linear_better": 0.79},
                     "timestep_uniform_masked_token_accuracy": {"p05": -0.041, "p95": 0.001, "probability_linear_better": 0.11},
                     "schedule_reweighted_pseudo_perplexity": {"p05": -0.08, "p95": 0.32, "probability_linear_better": 0.22},
                     "schedule_reweighted_bits_per_masked_token": {"p05": -0.022, "p95": 0.052, "probability_linear_better": 0.22},
+                    "schedule_reweighted_bits_saved_vs_uniform": {"p05": -0.052, "p95": 0.022, "probability_linear_better": 0.78},
+                    "schedule_reweighted_denoising_skill": {"p05": -0.02, "p95": 0.009, "probability_linear_better": 0.78},
                     "schedule_reweighted_masked_token_accuracy": {"p05": -0.042, "p95": 0.002, "probability_linear_better": 0.12},
                     "grid_uniform_pseudo_perplexity": {"p05": -0.07, "p95": 0.33, "probability_linear_better": 0.23},
                     "grid_uniform_bits_per_masked_token": {"p05": -0.023, "p95": 0.053, "probability_linear_better": 0.23},
+                    "grid_uniform_bits_saved_vs_uniform": {"p05": -0.053, "p95": 0.023, "probability_linear_better": 0.77},
+                    "grid_uniform_denoising_skill": {"p05": -0.021, "p95": 0.01, "probability_linear_better": 0.77},
                     "grid_uniform_masked_token_accuracy": {"p05": -0.043, "p95": 0.003, "probability_linear_better": 0.13},
                     "timestep_macro_pseudo_perplexity": {"p05": -0.06, "p95": 0.34, "probability_linear_better": 0.24},
                     "timestep_macro_bits_per_masked_token": {"p05": -0.024, "p95": 0.054, "probability_linear_better": 0.24},
+                    "timestep_macro_bits_saved_vs_uniform": {"p05": -0.054, "p95": 0.024, "probability_linear_better": 0.76},
+                    "timestep_macro_denoising_skill": {"p05": -0.022, "p95": 0.011, "probability_linear_better": 0.76},
                     "timestep_macro_masked_token_accuracy": {"p05": -0.044, "p95": 0.004, "probability_linear_better": 0.14},
                     "timestep_auc_pseudo_perplexity": {"p05": -0.05, "p95": 0.35, "probability_linear_better": 0.25},
                     "timestep_auc_bits_per_masked_token": {"p05": -0.025, "p95": 0.055, "probability_linear_better": 0.25},
+                    "timestep_auc_bits_saved_vs_uniform": {"p05": -0.055, "p95": 0.025, "probability_linear_better": 0.75},
+                    "timestep_auc_denoising_skill": {"p05": -0.023, "p95": 0.012, "probability_linear_better": 0.75},
                     "timestep_auc_masked_token_accuracy": {"p05": -0.045, "p95": 0.005, "probability_linear_better": 0.15},
                 }
             },
@@ -277,6 +289,8 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertEqual(comparison_rows[1]["bootstrap_p95"], 0.05)
         comparison_rows_by_view = {row["metric_view"]: row for row in comparison_rows}
         self.assertEqual(comparison_rows_by_view["timestep_auc_bits_saved_vs_uniform"]["winner"], "cosine_schedule")
+        self.assertEqual(comparison_rows_by_view["timestep_auc_bits_saved_vs_uniform"]["bootstrap_p95"], 0.025)
+        self.assertEqual(comparison_rows_by_view["timestep_auc_bits_saved_vs_uniform"]["probability_linear_better"], 0.75)
         self.assertEqual(comparison_rows[-1]["bootstrap_p95"], 0.005)
         self.assertEqual(comparison_rows[-1]["probability_linear_better"], 0.15)
 
@@ -313,7 +327,8 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("- optional `hf_export_manifest.json` bundle manifest covering all exported metadata files", content)
         self.assertIn("| schedule_reweighted_pseudo_perplexity | lower | 2.2 | 2.32 | 0.12 | cosine_schedule | -0.08 | 0.32 | 0.22 |", content)
         self.assertIn("| timestep_uniform_accuracy | higher | 0.41 | 0.389 | -0.021 | cosine_schedule | -0.041 | 0.001 | 0.11 |", content)
-        self.assertIn("| timestep_auc_bits_saved_vs_uniform | higher | 0.5 | 0.482 | -0.018 | cosine_schedule | None | None | None |", content)
+        self.assertIn("| timestep_auc_bits_saved_vs_uniform | higher | 0.5 | 0.482 | -0.018 | cosine_schedule | -0.055 | 0.025 | 0.75 |", content)
+        self.assertIn("| sampled_denoising_skill | higher | 0.6393262397777592 | 0.6357195021755369 | -0.0036067376022224087 | cosine_schedule | -0.018 | 0.007 | 0.8 |", content)
         self.assertIn("| schedule_reweighted_accuracy | higher | 0.42 | 0.398 | -0.022 | cosine_schedule | -0.042 | 0.002 | 0.12 |", content)
 
 

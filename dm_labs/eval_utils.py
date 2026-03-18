@@ -593,6 +593,7 @@ def _bootstrap_paired_comparison_interval(
     linear_grid_batch_metrics: Optional[Sequence[Dict[str, float]]] = None,
     cosine_timestep_metrics: Optional[Sequence[Dict[str, float]]] = None,
     linear_timestep_metrics: Optional[Sequence[Dict[str, float]]] = None,
+    vocab_size: Optional[int] = None,
     n_samples: int = 500,
     seed: int = 0,
 ) -> Dict[str, object]:
@@ -817,6 +818,34 @@ def _bootstrap_paired_comparison_interval(
     summary.update({key: _with_win_probability(key, values) for key, values in example_delta_samples.items()})
     summary.update({key: _with_win_probability(key, values) for key, values in grid_delta_samples.items()})
     summary.update({key: _with_win_probability(key, values) for key, values in timestep_macro_delta_samples.items()})
+
+    if vocab_size is not None and int(vocab_size) > 1:
+        uniform_ce = math.log(float(vocab_size))
+        calibration_delta_map = {
+            "sampled_bits_saved_vs_uniform": ("bits_per_masked_token", -1.0),
+            "sampled_denoising_skill": ("avg_cross_entropy", -1.0 / uniform_ce),
+            "timestep_uniform_bits_saved_vs_uniform": ("timestep_uniform_bits_per_masked_token", -1.0),
+            "timestep_uniform_denoising_skill": ("timestep_uniform_avg_cross_entropy", -1.0 / uniform_ce),
+            "schedule_reweighted_bits_saved_vs_uniform": ("schedule_reweighted_bits_per_masked_token", -1.0),
+            "schedule_reweighted_denoising_skill": ("schedule_reweighted_avg_cross_entropy", -1.0 / uniform_ce),
+            "grid_uniform_bits_saved_vs_uniform": ("grid_uniform_bits_per_masked_token", -1.0),
+            "grid_uniform_denoising_skill": ("grid_uniform_avg_cross_entropy", -1.0 / uniform_ce),
+            "timestep_macro_bits_saved_vs_uniform": ("timestep_macro_bits_per_masked_token", -1.0),
+            "timestep_macro_denoising_skill": ("timestep_macro_avg_cross_entropy", -1.0 / uniform_ce),
+            "timestep_auc_bits_saved_vs_uniform": ("timestep_auc_bits_per_masked_token", -1.0),
+            "timestep_auc_denoising_skill": ("timestep_auc_avg_cross_entropy", -1.0 / uniform_ce),
+        }
+        for calibration_key, (source_key, scale) in calibration_delta_map.items():
+            source_summary = summary.get(source_key)
+            if not source_summary:
+                continue
+            summary[calibration_key] = {
+                "mean": float(source_summary.get("mean", float("nan"))) * scale,
+                "p05": float(source_summary.get("p95", float("nan"))) * scale if scale < 0.0 else float(source_summary.get("p05", float("nan"))) * scale,
+                "p50": float(source_summary.get("p50", float("nan"))) * scale,
+                "p95": float(source_summary.get("p05", float("nan"))) * scale if scale < 0.0 else float(source_summary.get("p95", float("nan"))) * scale,
+                "probability_linear_better": 1.0 - float(source_summary.get("probability_linear_better", float("nan"))),
+            }
     return {
         "method": "paired_bootstrap_over_shared_eval_plan",
         "n_pairs": n_batches,
@@ -1679,6 +1708,7 @@ def compare_schedule_checkpoints(
             linear_grid_batch_metrics=models[1].get("grid_batch_metrics", []),
             cosine_timestep_metrics=models[0].get("timestep_metrics", []),
             linear_timestep_metrics=models[1].get("timestep_metrics", []),
+            vocab_size=models[0].get("vocab_size") or models[1].get("vocab_size"),
             n_samples=bootstrap_samples,
             seed=seed,
         )
