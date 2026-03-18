@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dm_labs.hf_utils import build_eval_view_rows, build_schedule_comparison_rows, ensure_hf_model_card, write_eval_plan, write_hf_export_bundle
+from dm_labs.hf_utils import build_eval_view_rows, build_schedule_comparison_rows, ensure_hf_model_card, validate_hf_export_bundle, write_eval_plan, write_hf_export_bundle
 
 
 class HuggingFaceModelCardTests(unittest.TestCase):
@@ -95,6 +95,38 @@ class HuggingFaceModelCardTests(unittest.TestCase):
 
         comparison_summary = {
             "models": [{"tag": "cosine_schedule"}, {"tag": "linear_schedule_baseline"}],
+            "winner_confidence": {
+                "pseudo_perplexity": {"winner_probability": 0.8, "ci_excludes_zero": False, "practically_tied": True},
+                "bits_per_masked_token": {"winner_probability": 0.8, "ci_excludes_zero": False, "practically_tied": True},
+                "sampled_bits_saved_vs_uniform": {"winner_probability": 0.8, "ci_excludes_zero": False, "practically_tied": True},
+                "sampled_denoising_skill": {"winner_probability": 0.8, "ci_excludes_zero": False, "practically_tied": True},
+                "masked_token_accuracy": {"winner_probability": 0.9, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_uniform_pseudo_perplexity": {"winner_probability": 0.79, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_uniform_bits_per_masked_token": {"winner_probability": 0.79, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_uniform_bits_saved_vs_uniform": {"winner_probability": 0.79, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_uniform_denoising_skill": {"winner_probability": 0.79, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_uniform_masked_token_accuracy": {"winner_probability": 0.89, "ci_excludes_zero": False, "practically_tied": True},
+                "schedule_reweighted_pseudo_perplexity": {"winner_probability": 0.78, "ci_excludes_zero": False, "practically_tied": True},
+                "schedule_reweighted_bits_per_masked_token": {"winner_probability": 0.78, "ci_excludes_zero": False, "practically_tied": True},
+                "schedule_reweighted_bits_saved_vs_uniform": {"winner_probability": 0.78, "ci_excludes_zero": False, "practically_tied": True},
+                "schedule_reweighted_denoising_skill": {"winner_probability": 0.78, "ci_excludes_zero": False, "practically_tied": True},
+                "schedule_reweighted_masked_token_accuracy": {"winner_probability": 0.88, "ci_excludes_zero": False, "practically_tied": True},
+                "grid_uniform_pseudo_perplexity": {"winner_probability": 0.77, "ci_excludes_zero": False, "practically_tied": True},
+                "grid_uniform_bits_per_masked_token": {"winner_probability": 0.77, "ci_excludes_zero": False, "practically_tied": True},
+                "grid_uniform_bits_saved_vs_uniform": {"winner_probability": 0.77, "ci_excludes_zero": False, "practically_tied": True},
+                "grid_uniform_denoising_skill": {"winner_probability": 0.77, "ci_excludes_zero": False, "practically_tied": True},
+                "grid_uniform_masked_token_accuracy": {"winner_probability": 0.87, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_macro_pseudo_perplexity": {"winner_probability": 0.76, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_macro_bits_per_masked_token": {"winner_probability": 0.76, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_macro_bits_saved_vs_uniform": {"winner_probability": 0.76, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_macro_denoising_skill": {"winner_probability": 0.76, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_macro_masked_token_accuracy": {"winner_probability": 0.86, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_auc_pseudo_perplexity": {"winner_probability": 0.75, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_auc_bits_per_masked_token": {"winner_probability": 0.75, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_auc_bits_saved_vs_uniform": {"winner_probability": 0.75, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_auc_denoising_skill": {"winner_probability": 0.75, "ci_excludes_zero": False, "practically_tied": True},
+                "timestep_auc_masked_token_accuracy": {"winner_probability": 0.85, "ci_excludes_zero": False, "practically_tied": True},
+            },
             "delta": {
                 "pseudo_perplexity": 0.1,
                 "avg_cross_entropy": 0.01,
@@ -287,6 +319,9 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertEqual(comparison_rows[1]["cosine_value"], 3.0)
         self.assertEqual(comparison_rows[1]["linear_value"], 3.0144269504088897)
         self.assertEqual(comparison_rows[1]["bootstrap_p95"], 0.05)
+        self.assertEqual(comparison_rows[1]["winner_probability"], 0.8)
+        self.assertFalse(comparison_rows[1]["ci_excludes_zero"])
+        self.assertTrue(comparison_rows[1]["practically_tied"])
         comparison_rows_by_view = {row["metric_view"]: row for row in comparison_rows}
         self.assertEqual(comparison_rows_by_view["timestep_auc_bits_saved_vs_uniform"]["winner"], "cosine_schedule")
         self.assertEqual(comparison_rows_by_view["timestep_auc_bits_saved_vs_uniform"]["bootstrap_p95"], 0.025)
@@ -307,6 +342,12 @@ class HuggingFaceModelCardTests(unittest.TestCase):
             )
             self.assertTrue(Path(bundle["manifest_path"]).exists())
             self.assertTrue(Path(bundle["eval_plan_path"]).exists())
+            self.assertTrue(bundle["validation"]["ready_for_upload"])
+            self.assertTrue(bundle["validation"]["checks"]["manifest_repo_id_matches"])
+            validation = validate_hf_export_bundle(tmpdir, repo_id="bitlabsdevteam/dm-labs-test")
+            self.assertTrue(validation["ready_for_upload"])
+            self.assertTrue(validation["checks"]["eval_summary_exists"])
+            self.assertTrue(validation["checks"]["schedule_comparison_exists"])
             card_path = ensure_hf_model_card(
                 tmpdir,
                 repo_id="bitlabsdevteam/dm-labs-test",
@@ -325,11 +366,11 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("- schedule_reweighted_aggregation: inverse_expected_mask_ratio_weighting_over_sampled_masked_tokens", content)
         self.assertIn("- optional `eval_plan.pt` shared cached evaluation plan artifact", content)
         self.assertIn("- optional `hf_export_manifest.json` bundle manifest covering all exported metadata files", content)
-        self.assertIn("| schedule_reweighted_pseudo_perplexity | lower | 2.2 | 2.32 | 0.12 | cosine_schedule | -0.08 | 0.32 | 0.22 |", content)
-        self.assertIn("| timestep_uniform_accuracy | higher | 0.41 | 0.389 | -0.021 | cosine_schedule | -0.041 | 0.001 | 0.11 |", content)
-        self.assertIn("| timestep_auc_bits_saved_vs_uniform | higher | 0.5 | 0.482 | -0.018 | cosine_schedule | -0.055 | 0.025 | 0.75 |", content)
-        self.assertIn("| sampled_denoising_skill | higher | 0.6393262397777592 | 0.6357195021755369 | -0.0036067376022224087 | cosine_schedule | -0.018 | 0.007 | 0.8 |", content)
-        self.assertIn("| schedule_reweighted_accuracy | higher | 0.42 | 0.398 | -0.022 | cosine_schedule | -0.042 | 0.002 | 0.12 |", content)
+        self.assertIn("| schedule_reweighted_pseudo_perplexity | lower | 2.2 | 2.32 | 0.12 | cosine_schedule | 0.78 | False | True | -0.08 | 0.32 | 0.22 |", content)
+        self.assertIn("| timestep_uniform_accuracy | higher | 0.41 | 0.389 | -0.021 | cosine_schedule | 0.89 | False | True | -0.041 | 0.001 | 0.11 |", content)
+        self.assertIn("| timestep_auc_bits_saved_vs_uniform | higher | 0.5 | 0.482 | -0.018 | cosine_schedule | 0.75 | False | True | -0.055 | 0.025 | 0.75 |", content)
+        self.assertIn("| sampled_denoising_skill | higher | 0.6393262397777592 | 0.6357195021755369 | -0.0036067376022224087 | cosine_schedule | 0.8 | False | True | -0.018 | 0.007 | 0.8 |", content)
+        self.assertIn("| schedule_reweighted_accuracy | higher | 0.42 | 0.398 | -0.022 | cosine_schedule | 0.88 | False | True | -0.042 | 0.002 | 0.12 |", content)
 
 
 if __name__ == "__main__":

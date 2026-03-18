@@ -477,6 +477,7 @@ def build_schedule_comparison_rows(comparison_summary: Optional[dict] = None) ->
 
     delta = comparison_summary.get("delta") or {}
     winner = comparison_summary.get("winner") or {}
+    winner_confidence = comparison_summary.get("winner_confidence") or {}
     delta_ci = ((comparison_summary.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {})
     models = comparison_summary.get("models") or []
     cosine_model = models[0] if len(models) > 0 else {}
@@ -487,6 +488,7 @@ def build_schedule_comparison_rows(comparison_summary: Optional[dict] = None) ->
     rows = []
     for spec in COMPARISON_VIEW_SPECS:
         ci = delta_ci.get(spec["ci_key"]) or {}
+        confidence = winner_confidence.get(spec["winner_key"]) or {}
         cosine_value = _nested_get(cosine_model, spec["cosine_value_key"][1:]) if spec["cosine_value_key"][0] == "model" else _nested_get(cosine_calibration, spec["cosine_value_key"][1:])
         linear_value = _nested_get(linear_model, spec["linear_value_key"][1:]) if spec["linear_value_key"][0] == "model" else _nested_get(linear_calibration, spec["linear_value_key"][1:])
         rows.append(
@@ -500,6 +502,9 @@ def build_schedule_comparison_rows(comparison_summary: Optional[dict] = None) ->
                 "bootstrap_p05": ci.get("p05"),
                 "bootstrap_p95": ci.get("p95"),
                 "probability_linear_better": ci.get("probability_linear_better"),
+                "winner_probability": confidence.get("winner_probability"),
+                "ci_excludes_zero": confidence.get("ci_excludes_zero"),
+                "practically_tied": confidence.get("practically_tied"),
             }
         )
     return rows
@@ -532,6 +537,41 @@ def write_eval_plan(local_artifact_dir: str, eval_plan=None) -> Optional[str]:
 
     torch.save(eval_plan, out_path)
     return str(out_path)
+
+
+def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = None) -> dict:
+    local_artifact_dir = Path(local_artifact_dir)
+    manifest_path = local_artifact_dir / "hf_export_manifest.json"
+    readme_path = local_artifact_dir / "README.md"
+    eval_summary_path = local_artifact_dir / "eval_summary.json"
+    comparison_path = local_artifact_dir / "schedule_comparison.json"
+    eval_plan_path = local_artifact_dir / "eval_plan.pt"
+
+    manifest = {}
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    checks = {
+        "artifact_dir_exists": local_artifact_dir.exists(),
+        "readme_exists": readme_path.exists(),
+        "manifest_exists": manifest_path.exists(),
+        "eval_summary_exists": eval_summary_path.exists(),
+        "schedule_comparison_exists": comparison_path.exists(),
+        "eval_plan_exists": eval_plan_path.exists(),
+        "manifest_repo_id_matches": (repo_id is None) or (manifest.get("repo_id") == repo_id),
+    }
+    return {
+        "repo_id": repo_id or manifest.get("repo_id"),
+        "local_artifact_dir": str(local_artifact_dir),
+        "checks": checks,
+        "ready_for_upload": bool(checks["artifact_dir_exists"] and checks["readme_exists"] and checks["manifest_exists"] and checks["manifest_repo_id_matches"]),
+        "manifest_path": str(manifest_path),
+        "readme_path": str(readme_path),
+        "eval_summary_path": str(eval_summary_path) if eval_summary_path.exists() else None,
+        "comparison_summary_path": str(comparison_path) if comparison_path.exists() else None,
+        "eval_plan_path": str(eval_plan_path) if eval_plan_path.exists() else None,
+    }
+
 
 
 def write_hf_export_bundle(
@@ -569,6 +609,7 @@ def write_hf_export_bundle(
     manifest_path = local_artifact_dir / "hf_export_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     manifest["manifest_path"] = str(manifest_path)
+    manifest["validation"] = validate_hf_export_bundle(local_artifact_dir, repo_id=repo_id)
     return manifest
 
 
@@ -643,12 +684,12 @@ def ensure_hf_model_card(
     if comparison_rows:
         comparison_lines = [
             "\n## Schedule comparison\n",
-            "| metric_view | better_direction | cosine_value | linear_value | delta_linear_minus_cosine | winner | bootstrap_p05 | bootstrap_p95 | probability_linear_better |",
-            "| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: |",
+            "| metric_view | better_direction | cosine_value | linear_value | delta_linear_minus_cosine | winner | winner_probability | ci_excludes_zero | practically_tied | bootstrap_p05 | bootstrap_p95 | probability_linear_better |",
+            "| --- | --- | ---: | ---: | ---: | --- | ---: | --- | --- | ---: | ---: | ---: |",
         ]
         for row in comparison_rows:
             comparison_lines.append(
-                f"| {row['metric_view']} | {row['better_direction']} | {row['cosine_value']} | {row['linear_value']} | {row['delta_linear_minus_cosine']} | {row['winner']} | {row['bootstrap_p05']} | {row['bootstrap_p95']} | {row['probability_linear_better']} |"
+                f"| {row['metric_view']} | {row['better_direction']} | {row['cosine_value']} | {row['linear_value']} | {row['delta_linear_minus_cosine']} | {row['winner']} | {row.get('winner_probability')} | {row.get('ci_excludes_zero')} | {row.get('practically_tied')} | {row['bootstrap_p05']} | {row['bootstrap_p95']} | {row['probability_linear_better']} |"
             )
         delta = comparison_summary.get("delta") or {}
         comparison_lines.extend(
@@ -689,6 +730,7 @@ This model repo contains artifacts exported from the DM_Labs notebook for a disc
 - optional `eval_plan.pt` shared cached evaluation plan artifact
 - optional `hf_export_manifest.json` bundle manifest covering all exported metadata files
 - optional schedule-comparison JSON artifacts
+- optional bundle validation metadata inside `hf_export_manifest.json`
 {metrics_block}{protocol_block}{comparison_block}## Evaluation note
 
 The reported pseudo-perplexity is based on masked-token denoising NLL under a diffusion corruption process. It is **not** autoregressive next-token perplexity.

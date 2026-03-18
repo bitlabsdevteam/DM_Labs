@@ -1520,6 +1520,50 @@ def _comparison_calibration_views(summary: Dict[str, object]) -> Dict[str, Dict[
     }
 
 
+def _paired_delta_confidence_summary(
+    delta_summary: Optional[Dict[str, object]],
+    *,
+    better_direction: str,
+) -> Dict[str, object]:
+    if not delta_summary:
+        return {
+            "ci_excludes_zero": False,
+            "winner_probability": float("nan"),
+            "loser_probability": float("nan"),
+            "practically_tied": True,
+        }
+
+    p05 = delta_summary.get("p05")
+    p95 = delta_summary.get("p95")
+    probability_linear_better = delta_summary.get("probability_linear_better")
+    try:
+        p05 = float(p05)
+        p95 = float(p95)
+        probability_linear_better = float(probability_linear_better)
+    except (TypeError, ValueError):
+        return {
+            "ci_excludes_zero": False,
+            "winner_probability": float("nan"),
+            "loser_probability": float("nan"),
+            "practically_tied": True,
+        }
+
+    if math.isnan(probability_linear_better):
+        winner_probability = float("nan")
+        loser_probability = float("nan")
+    else:
+        winner_probability = probability_linear_better if better_direction == "higher" else 1.0 - probability_linear_better
+        loser_probability = 1.0 - winner_probability
+
+    ci_excludes_zero = (p05 > 0.0) or (p95 < 0.0)
+    return {
+        "ci_excludes_zero": bool(ci_excludes_zero),
+        "winner_probability": float(winner_probability),
+        "loser_probability": float(loser_probability),
+        "practically_tied": not bool(ci_excludes_zero),
+    }
+
+
 def compare_schedule_checkpoints(
     cosine_dir,
     linear_dir,
@@ -1712,6 +1756,44 @@ def compare_schedule_checkpoints(
             n_samples=bootstrap_samples,
             seed=seed,
         )
+        comparison["winner_confidence"] = {
+            "pseudo_perplexity": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("pseudo_perplexity"), better_direction="lower"),
+            "avg_cross_entropy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("avg_cross_entropy"), better_direction="lower"),
+            "bits_per_masked_token": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("bits_per_masked_token"), better_direction="lower"),
+            "masked_token_accuracy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("masked_token_accuracy"), better_direction="higher"),
+            "timestep_uniform_pseudo_perplexity": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_uniform_pseudo_perplexity"), better_direction="lower"),
+            "timestep_uniform_avg_cross_entropy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_uniform_avg_cross_entropy"), better_direction="lower"),
+            "timestep_uniform_bits_per_masked_token": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_uniform_bits_per_masked_token"), better_direction="lower"),
+            "timestep_uniform_masked_token_accuracy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_uniform_masked_token_accuracy"), better_direction="higher"),
+            "schedule_reweighted_pseudo_perplexity": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_pseudo_perplexity"), better_direction="lower"),
+            "schedule_reweighted_avg_cross_entropy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_avg_cross_entropy"), better_direction="lower"),
+            "schedule_reweighted_bits_per_masked_token": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_bits_per_masked_token"), better_direction="lower"),
+            "schedule_reweighted_masked_token_accuracy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_masked_token_accuracy"), better_direction="higher"),
+            "grid_uniform_pseudo_perplexity": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_pseudo_perplexity"), better_direction="lower"),
+            "grid_uniform_avg_cross_entropy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_avg_cross_entropy"), better_direction="lower"),
+            "grid_uniform_bits_per_masked_token": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_bits_per_masked_token"), better_direction="lower"),
+            "grid_uniform_masked_token_accuracy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_masked_token_accuracy"), better_direction="higher"),
+            "timestep_macro_pseudo_perplexity": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_macro_pseudo_perplexity"), better_direction="lower"),
+            "timestep_macro_avg_cross_entropy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_macro_avg_cross_entropy"), better_direction="lower"),
+            "timestep_macro_bits_per_masked_token": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_macro_bits_per_masked_token"), better_direction="lower"),
+            "timestep_macro_masked_token_accuracy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_macro_masked_token_accuracy"), better_direction="higher"),
+            "timestep_auc_pseudo_perplexity": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_pseudo_perplexity"), better_direction="lower"),
+            "timestep_auc_avg_cross_entropy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_avg_cross_entropy"), better_direction="lower"),
+            "timestep_auc_bits_per_masked_token": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_bits_per_masked_token"), better_direction="lower"),
+            "timestep_auc_masked_token_accuracy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_masked_token_accuracy"), better_direction="higher"),
+            "sampled_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("sampled_bits_saved_vs_uniform"), better_direction="higher"),
+            "sampled_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("sampled_denoising_skill"), better_direction="higher"),
+            "timestep_uniform_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_uniform_bits_saved_vs_uniform"), better_direction="higher"),
+            "timestep_uniform_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_uniform_denoising_skill"), better_direction="higher"),
+            "schedule_reweighted_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_bits_saved_vs_uniform"), better_direction="higher"),
+            "schedule_reweighted_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_denoising_skill"), better_direction="higher"),
+            "grid_uniform_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_bits_saved_vs_uniform"), better_direction="higher"),
+            "grid_uniform_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_denoising_skill"), better_direction="higher"),
+            "timestep_macro_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_macro_bits_saved_vs_uniform"), better_direction="higher"),
+            "timestep_macro_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_macro_denoising_skill"), better_direction="higher"),
+            "timestep_auc_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_bits_saved_vs_uniform"), better_direction="higher"),
+            "timestep_auc_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_denoising_skill"), better_direction="higher"),
+        }
     return comparison
 
 

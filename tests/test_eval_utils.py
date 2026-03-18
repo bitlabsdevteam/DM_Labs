@@ -241,6 +241,10 @@ class ScheduleComparisonRemapTests(unittest.TestCase):
         self.assertIn("timestep_auc_masked_token_accuracy", delta_ci)
         self.assertIn("schedule_reweighted_pseudo_perplexity", delta_ci)
         self.assertIn("schedule_reweighted_masked_token_accuracy", delta_ci)
+        self.assertIn("winner_confidence", comparison)
+        self.assertIn("timestep_auc_bits_saved_vs_uniform", comparison["winner_confidence"])
+        self.assertIn("ci_excludes_zero", comparison["winner_confidence"]["timestep_auc_bits_saved_vs_uniform"])
+        self.assertIn("winner_probability", comparison["winner_confidence"]["schedule_reweighted_masked_token_accuracy"])
 
 
 if __name__ == "__main__":
