@@ -1441,6 +1441,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         "timestep_auc_aggregation": "normalized_trapezoid_integral_over_token_weighted_per_timestep_metrics_on_cached_grid",
         "bootstrap_samples": bootstrap_samples,
     }
+    result["quality_summary"] = _build_eval_quality_summary(result)
     return result
 
 
@@ -1561,6 +1562,134 @@ def _paired_delta_confidence_summary(
         "winner_probability": float(winner_probability),
         "loser_probability": float(loser_probability),
         "practically_tied": not bool(ci_excludes_zero),
+    }
+
+
+def _schedule_reweighted_reliability_bucket(effective_sample_size_fraction: float) -> str:
+    if effective_sample_size_fraction is None:
+        return "unknown"
+    try:
+        value = float(effective_sample_size_fraction)
+    except (TypeError, ValueError):
+        return "unknown"
+    if math.isnan(value):
+        return "unknown"
+    if value >= 0.5:
+        return "strong"
+    if value >= 0.25:
+        return "usable"
+    return "fragile"
+
+
+def _build_eval_quality_summary(result: Dict[str, object]) -> Dict[str, object]:
+    protocol = result.get("eval_protocol") or {}
+    notes: List[str] = []
+    warnings: List[str] = []
+
+    sampled_example_count = int(result.get("sampled_example_count", 0) or 0)
+    masked_tokens = int(result.get("masked_tokens", 0) or 0)
+    timestep_count = int(result.get("timestep_macro_timestep_count", 0) or 0)
+    ess_fraction = result.get("schedule_reweighted_effective_sample_size_fraction")
+    ess_bucket = _schedule_reweighted_reliability_bucket(ess_fraction)
+
+    if sampled_example_count > 0:
+        notes.append(f"Sampled evaluation covers {sampled_example_count} per-example corruption draws and {masked_tokens} masked tokens.")
+    else:
+        warnings.append("Sampled evaluation did not record per-example corruption draws; timestep-uniform and schedule-reweighted views may be fallback estimates.")
+
+    if protocol.get("normalized_timestep_remapping"):
+        notes.append("Checkpoint comparisons/evaluations remap cached plan timesteps by normalized timestep fraction because diffusion step counts differ.")
+
+    if timestep_count >= 3:
+        notes.append(f"Fixed-grid timestep diagnostics span {timestep_count} timesteps, which is enough to make timestep-macro and timestep-AUC summaries informative.")
+    elif timestep_count > 0:
+        warnings.append(f"Fixed-grid timestep diagnostics only span {timestep_count} timesteps; macro/AUC views are available but thin.")
+    else:
+        warnings.append("No fixed-grid timestep diagnostics were recorded.")
+
+    if ess_bucket == "strong":
+        notes.append("Schedule-reweighted sampled evaluation has strong effective sample size support.")
+    elif ess_bucket == "usable":
+        warnings.append("Schedule-reweighted sampled evaluation is usable but somewhat variance-sensitive; consult the ESS before over-interpreting small deltas.")
+    elif ess_bucket == "fragile":
+        warnings.append("Schedule-reweighted sampled evaluation is variance-fragile because the effective sample size fraction is low.")
+    else:
+        warnings.append("Schedule-reweighted sampled evaluation did not produce a finite effective sample size diagnostic.")
+
+    return {
+        "sampled_example_count": sampled_example_count,
+        "masked_tokens": masked_tokens,
+        "timestep_macro_timestep_count": timestep_count,
+        "schedule_reweighted_effective_sample_size": result.get("schedule_reweighted_effective_sample_size"),
+        "schedule_reweighted_effective_sample_size_fraction": ess_fraction,
+        "schedule_reweighted_reliability": ess_bucket,
+        "normalized_timestep_remapping": bool(protocol.get("normalized_timestep_remapping", False)),
+        "notes": notes,
+        "warnings": warnings,
+    }
+
+
+def _build_comparison_decision_summary(comparison: Dict[str, object]) -> Dict[str, object]:
+    winner = comparison.get("winner") or {}
+    confidence = comparison.get("winner_confidence") or {}
+    tracked_metrics = [
+        ("sampled_pseudo_perplexity", "pseudo_perplexity", "lower"),
+        ("timestep_uniform_pseudo_perplexity", "timestep_uniform_pseudo_perplexity", "lower"),
+        ("schedule_reweighted_pseudo_perplexity", "schedule_reweighted_pseudo_perplexity", "lower"),
+        ("grid_uniform_pseudo_perplexity", "grid_uniform_pseudo_perplexity", "lower"),
+        ("timestep_macro_pseudo_perplexity", "timestep_macro_pseudo_perplexity", "lower"),
+        ("timestep_auc_pseudo_perplexity", "timestep_auc_pseudo_perplexity", "lower"),
+        ("sampled_accuracy", "masked_token_accuracy", "higher"),
+        ("timestep_auc_accuracy", "timestep_auc_masked_token_accuracy", "higher"),
+        ("sampled_bits_saved_vs_uniform", "sampled_bits_saved_vs_uniform", "higher"),
+        ("timestep_auc_bits_saved_vs_uniform", "timestep_auc_bits_saved_vs_uniform", "higher"),
+    ]
+
+    rows = []
+    cosine_wins = 0
+    linear_wins = 0
+    tied = 0
+    decisive = 0
+    for public_name, key, better_direction in tracked_metrics:
+        metric_conf = confidence.get(key) or {}
+        metric_winner = winner.get(key)
+        practically_tied = bool(metric_conf.get("practically_tied", True))
+        ci_excludes_zero = bool(metric_conf.get("ci_excludes_zero", False))
+        winner_probability = metric_conf.get("winner_probability")
+        if practically_tied:
+            tied += 1
+        elif metric_winner == "cosine_schedule":
+            cosine_wins += 1
+        elif metric_winner == "linear_schedule_baseline":
+            linear_wins += 1
+        if ci_excludes_zero:
+            decisive += 1
+        rows.append(
+            {
+                "metric": public_name,
+                "winner": metric_winner,
+                "better_direction": better_direction,
+                "winner_probability": winner_probability,
+                "ci_excludes_zero": ci_excludes_zero,
+                "practically_tied": practically_tied,
+            }
+        )
+
+    if cosine_wins > linear_wins:
+        headline = "cosine_schedule_leads"
+    elif linear_wins > cosine_wins:
+        headline = "linear_schedule_leads"
+    else:
+        headline = "no_clear_schedule_lead"
+
+    return {
+        "headline": headline,
+        "tracked_metric_count": len(tracked_metrics),
+        "decisive_metric_count": decisive,
+        "practically_tied_metric_count": tied,
+        "cosine_schedule_win_count": cosine_wins,
+        "linear_schedule_win_count": linear_wins,
+        "tracked_metrics": rows,
     }
 
 
@@ -1794,6 +1923,7 @@ def compare_schedule_checkpoints(
             "timestep_auc_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_bits_saved_vs_uniform"), better_direction="higher"),
             "timestep_auc_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_denoising_skill"), better_direction="higher"),
         }
+        comparison["decision_summary"] = _build_comparison_decision_summary(comparison)
     return comparison
 
 

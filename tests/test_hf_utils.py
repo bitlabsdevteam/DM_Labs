@@ -91,6 +91,17 @@ class HuggingFaceModelCardTests(unittest.TestCase):
                 "timestep_auc_aggregation": "normalized_trapezoid_integral_over_token_weighted_per_timestep_metrics_on_cached_grid",
                 "bootstrap_samples": 1000,
             },
+            "quality_summary": {
+                "sampled_example_count": 12,
+                "masked_tokens": 48,
+                "timestep_macro_timestep_count": 5,
+                "schedule_reweighted_effective_sample_size": 10.5,
+                "schedule_reweighted_effective_sample_size_fraction": 0.875,
+                "schedule_reweighted_reliability": "strong",
+                "normalized_timestep_remapping": False,
+                "notes": ["Sampled evaluation covers 12 per-example corruption draws and 48 masked tokens."],
+                "warnings": [],
+            },
         }
 
         comparison_summary = {
@@ -231,6 +242,18 @@ class HuggingFaceModelCardTests(unittest.TestCase):
                     "timestep_auc_masked_token_accuracy": {"p05": -0.045, "p95": 0.005, "probability_linear_better": 0.15},
                 }
             },
+            "decision_summary": {
+                "headline": "cosine_schedule_leads",
+                "tracked_metric_count": 10,
+                "decisive_metric_count": 0,
+                "practically_tied_metric_count": 10,
+                "cosine_schedule_win_count": 10,
+                "linear_schedule_win_count": 0,
+                "tracked_metrics": [
+                    {"metric": "sampled_pseudo_perplexity", "winner": "cosine_schedule", "better_direction": "lower", "winner_probability": 0.8, "ci_excludes_zero": False, "practically_tied": True},
+                    {"metric": "schedule_reweighted_pseudo_perplexity", "winner": "cosine_schedule", "better_direction": "lower", "winner_probability": 0.78, "ci_excludes_zero": False, "practically_tied": True}
+                ],
+            },
         }
 
         comparison_summary["models"] = [
@@ -364,6 +387,9 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("- schedule_reweighted_nonzero_examples: 12", content)
         self.assertIn("- schedule_reweighted_effective_sample_size: 10.5", content)
         self.assertIn("- schedule_reweighted_aggregation: inverse_expected_mask_ratio_weighting_over_sampled_masked_tokens", content)
+        self.assertIn("## Evaluation quality summary", content)
+        self.assertIn("- schedule_reweighted_reliability: strong", content)
+        self.assertIn("Sampled evaluation covers 12 per-example corruption draws and 48 masked tokens.", content)
         self.assertIn("- optional `eval_plan.pt` shared cached evaluation plan artifact", content)
         self.assertIn("- optional `hf_export_manifest.json` bundle manifest covering all exported metadata files", content)
         self.assertIn("| schedule_reweighted_pseudo_perplexity | lower | 2.2 | 2.32 | 0.12 | cosine_schedule | 0.78 | False | True | -0.08 | 0.32 | 0.22 |", content)
@@ -371,6 +397,9 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("| timestep_auc_bits_saved_vs_uniform | higher | 0.5 | 0.482 | -0.018 | cosine_schedule | 0.75 | False | True | -0.055 | 0.025 | 0.75 |", content)
         self.assertIn("| sampled_denoising_skill | higher | 0.6393262397777592 | 0.6357195021755369 | -0.0036067376022224087 | cosine_schedule | 0.8 | False | True | -0.018 | 0.007 | 0.8 |", content)
         self.assertIn("| schedule_reweighted_accuracy | higher | 0.42 | 0.398 | -0.022 | cosine_schedule | 0.88 | False | True | -0.042 | 0.002 | 0.12 |", content)
+        self.assertIn("## Schedule decision summary", content)
+        self.assertIn("- headline: cosine_schedule_leads", content)
+        self.assertIn("| sampled_pseudo_perplexity | cosine_schedule | lower | 0.8 | False | True |", content)
 
 
 if __name__ == "__main__":

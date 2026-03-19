@@ -64,6 +64,8 @@ class EvalPlanRemapTests(unittest.TestCase):
         self.assertIn("schedule_reweighted_avg_cross_entropy", result)
         self.assertIn("schedule_reweighted_pseudo_perplexity", result)
         self.assertIn("schedule_reweighted_aggregation", result["eval_protocol"])
+        self.assertIn("quality_summary", result)
+        self.assertIn("schedule_reweighted_reliability", result["quality_summary"])
 
     def test_timestep_auc_matches_constant_metric_surface(self):
         plan = {
@@ -245,6 +247,9 @@ class ScheduleComparisonRemapTests(unittest.TestCase):
         self.assertIn("timestep_auc_bits_saved_vs_uniform", comparison["winner_confidence"])
         self.assertIn("ci_excludes_zero", comparison["winner_confidence"]["timestep_auc_bits_saved_vs_uniform"])
         self.assertIn("winner_probability", comparison["winner_confidence"]["schedule_reweighted_masked_token_accuracy"])
+        self.assertIn("decision_summary", comparison)
+        self.assertIn("headline", comparison["decision_summary"])
+        self.assertIn("tracked_metrics", comparison["decision_summary"])
 
 
 if __name__ == "__main__":

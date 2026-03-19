@@ -34,6 +34,8 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - paired bootstrap confidence intervals for linear-vs-cosine metric deltas on the shared eval plan
   - timestep-grid bootstrap confidence intervals for timestep-macro and timestep-AUC denoising aggregates in single-model eval artifacts
   - paired timestep-macro and timestep-AUC bootstrap intervals over the shared diagnostic grid, so equal-weight-over-timestep and trajectory-integral comparisons carry uncertainty too
+  - evaluation quality summaries covering schedule-reweighted ESS reliability, timestep-grid coverage, and timestep-remapping status
+  - comparison decision summaries that condense winner-confidence over the main pseudo-perplexity / calibration / accuracy views
   - per-timestep delta reporting for linear-vs-cosine comparisons
 - `dm_labs/hf_utils.py`
   - reusable Hugging Face model-card + upload helpers
@@ -83,6 +85,8 @@ Current protocol improvements in the repo:
 - attach **paired bootstrap delta intervals** so schedule winners are reported with uncertainty, not just point estimates
 - attach **timestep-grid bootstrap intervals** for both **timestep-macro** and **timestep-AUC** denoising summaries in single-model eval artifacts
 - attach **paired timestep-macro and timestep-AUC bootstrap intervals** so equal-weight-over-timestep and trajectory-level schedule claims are uncertainty-aware too
+- emit an explicit **evaluation quality summary** so users can see whether schedule-reweighted views are statistically strong or fragile before leaning on them
+- emit a compact **schedule decision summary** so notebook/HF outputs show whether cosine-vs-linear differences are decisive or still practically tied across the headline views
 - surface a **normalized timestep-fraction AUC** view so schedule comparisons can summarize the denoising trajectory without depending on equal timestep spacing
 - expose a **fixed-grid shared-timestep aggregate** plus paired uncertainty so cosine-vs-linear claims can be checked on an explicit common denoising surface
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts

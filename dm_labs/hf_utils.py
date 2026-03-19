@@ -627,7 +627,9 @@ def ensure_hf_model_card(
 
     metrics_block = ""
     protocol_block = ""
+    quality_block = ""
     comparison_block = ""
+    decision_block = ""
     if eval_summary:
         eval_rows = build_eval_view_rows(eval_summary)
         metrics_lines = [
@@ -679,6 +681,27 @@ def ensure_hf_model_card(
                 f"- timestep_auc_aggregation: {protocol.get('timestep_auc_aggregation')}\n"
                 f"- bootstrap_samples: {protocol.get('bootstrap_samples')}\n"
             )
+        quality_summary = eval_summary.get("quality_summary") or {}
+        if quality_summary:
+            quality_lines = [
+                "\n## Evaluation quality summary\n",
+                f"- schedule_reweighted_reliability: {quality_summary.get('schedule_reweighted_reliability')}",
+                f"- schedule_reweighted_effective_sample_size: {quality_summary.get('schedule_reweighted_effective_sample_size')}",
+                f"- schedule_reweighted_effective_sample_size_fraction: {quality_summary.get('schedule_reweighted_effective_sample_size_fraction')}",
+                f"- sampled_example_count: {quality_summary.get('sampled_example_count')}",
+                f"- masked_tokens: {quality_summary.get('masked_tokens')}",
+                f"- timestep_macro_timestep_count: {quality_summary.get('timestep_macro_timestep_count')}",
+                f"- normalized_timestep_remapping: {quality_summary.get('normalized_timestep_remapping')}",
+            ]
+            notes = quality_summary.get("notes") or []
+            warnings = quality_summary.get("warnings") or []
+            if notes:
+                quality_lines.append("- notes:")
+                quality_lines.extend([f"  - {note}" for note in notes])
+            if warnings:
+                quality_lines.append("- warnings:")
+                quality_lines.extend([f"  - {warning}" for warning in warnings])
+            quality_block = "\n".join(quality_lines) + "\n"
 
     comparison_rows = build_schedule_comparison_rows(comparison_summary)
     if comparison_rows:
@@ -705,6 +728,29 @@ def ensure_hf_model_card(
             ]
         )
         comparison_block = "\n".join(comparison_lines) + "\n"
+        decision_summary = comparison_summary.get("decision_summary") or {}
+        if decision_summary:
+            decision_lines = [
+                "\n## Schedule decision summary\n",
+                f"- headline: {decision_summary.get('headline')}",
+                f"- tracked_metric_count: {decision_summary.get('tracked_metric_count')}",
+                f"- decisive_metric_count: {decision_summary.get('decisive_metric_count')}",
+                f"- practically_tied_metric_count: {decision_summary.get('practically_tied_metric_count')}",
+                f"- cosine_schedule_win_count: {decision_summary.get('cosine_schedule_win_count')}",
+                f"- linear_schedule_win_count: {decision_summary.get('linear_schedule_win_count')}",
+            ]
+            tracked = decision_summary.get('tracked_metrics') or []
+            if tracked:
+                decision_lines.extend([
+                    "",
+                    "| metric | winner | better_direction | winner_probability | ci_excludes_zero | practically_tied |",
+                    "| --- | --- | --- | ---: | --- | --- |",
+                ])
+                for row in tracked:
+                    decision_lines.append(
+                        f"| {row.get('metric')} | {row.get('winner')} | {row.get('better_direction')} | {row.get('winner_probability')} | {row.get('ci_excludes_zero')} | {row.get('practically_tied')} |"
+                    )
+            decision_block = "\n".join(decision_lines) + "\n"
 
     readme_path.write_text(
         f"""---
@@ -731,7 +777,7 @@ This model repo contains artifacts exported from the DM_Labs notebook for a disc
 - optional `hf_export_manifest.json` bundle manifest covering all exported metadata files
 - optional schedule-comparison JSON artifacts
 - optional bundle validation metadata inside `hf_export_manifest.json`
-{metrics_block}{protocol_block}{comparison_block}## Evaluation note
+{metrics_block}{protocol_block}{quality_block}{comparison_block}{decision_block}## Evaluation note
 
 The reported pseudo-perplexity is based on masked-token denoising NLL under a diffusion corruption process. It is **not** autoregressive next-token perplexity.
 
