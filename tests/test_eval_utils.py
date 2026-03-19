@@ -64,6 +64,10 @@ class EvalPlanRemapTests(unittest.TestCase):
         self.assertIn("schedule_reweighted_avg_cross_entropy", result)
         self.assertIn("schedule_reweighted_pseudo_perplexity", result)
         self.assertIn("schedule_reweighted_aggregation", result["eval_protocol"])
+        self.assertIn("calibration", result)
+        self.assertIn("sampled", result["calibration"])
+        self.assertAlmostEqual(result["calibration"]["sampled"]["bits_saved_vs_uniform"], 0.0, places=6)
+        self.assertAlmostEqual(result["calibration"]["sampled"]["denoising_skill"], 0.0, places=6)
         self.assertIn("quality_summary", result)
         self.assertIn("schedule_reweighted_reliability", result["quality_summary"])
 
@@ -127,6 +131,13 @@ class EvalPlanRemapTests(unittest.TestCase):
         self.assertEqual(timestep_ci["n_timesteps"], 3)
         self.assertIn("timestep_macro_pseudo_perplexity", timestep_ci)
         self.assertIn("timestep_auc_pseudo_perplexity", timestep_ci)
+        calibration = result["calibration"]
+        self.assertAlmostEqual(calibration["timestep_auc"]["bits_saved_vs_uniform"], 0.0, places=6)
+        self.assertAlmostEqual(calibration["timestep_auc"]["denoising_skill"], 0.0, places=6)
+        self.assertAlmostEqual(calibration["timestep_auc"]["bits_saved_vs_uniform_ci_p05"], 0.0, places=6)
+        self.assertAlmostEqual(calibration["timestep_auc"]["bits_saved_vs_uniform_ci_p95"], 0.0, places=6)
+        self.assertAlmostEqual(calibration["timestep_auc"]["denoising_skill_ci_p05"], 0.0, places=6)
+        self.assertAlmostEqual(calibration["timestep_auc"]["denoising_skill_ci_p95"], 0.0, places=6)
 
 
     def test_schedule_reweighted_diagnostics_track_effective_sample_size(self):

@@ -1060,6 +1060,7 @@ def _empty_eval_result(
         "schedule_reweighted_confidence_intervals": _bootstrap_reweighted_metric_interval([], weight_key="schedule_reweighted_weight", n_samples=0, seed=seed),
         "grid_uniform_confidence_intervals": _bootstrap_grid_uniform_metric_interval([], n_samples=0, seed=seed),
         "timestep_confidence_intervals": _bootstrap_timestep_metric_interval([], n_samples=0, seed=seed),
+        "calibration": {},
         "notes": [
             "Pseudo-perplexity is computed from masked-token denoising NLL, not autoregressive next-token likelihood.",
             "Aggregate CE is token-weighted over all masked positions, avoiding per-batch averaging bias.",
@@ -1441,6 +1442,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         "timestep_auc_aggregation": "normalized_trapezoid_integral_over_token_weighted_per_timestep_metrics_on_cached_grid",
         "bootstrap_samples": bootstrap_samples,
     }
+    result["calibration"] = _build_calibration_view_summaries(result)
     result["quality_summary"] = _build_eval_quality_summary(result)
     return result
 
@@ -1489,36 +1491,97 @@ def load_diffusion_checkpoint(artifact_dir, device, config_cls, model_cls):
     return model, cfg
 
 
-def _comparison_calibration_views(summary: Dict[str, object]) -> Dict[str, Dict[str, float]]:
-    vocab_size = summary.get("vocab_size")
+def _calibration_interval_from_ce_ci(ce_ci: Optional[Dict[str, float]], vocab_size: Optional[int]) -> Dict[str, float]:
+    if vocab_size is None or int(vocab_size) <= 0 or not ce_ci:
+        return {
+            "bits_saved_vs_uniform_ci_p05": float("nan"),
+            "bits_saved_vs_uniform_ci_p95": float("nan"),
+            "denoising_skill_ci_p05": float("nan"),
+            "denoising_skill_ci_p95": float("nan"),
+        }
+    try:
+        ce_p05 = float(ce_ci.get("p05", float("nan")))
+        ce_p95 = float(ce_ci.get("p95", float("nan")))
+    except (TypeError, ValueError):
+        ce_p05 = float("nan")
+        ce_p95 = float("nan")
+    if math.isnan(ce_p05) or math.isnan(ce_p95):
+        return {
+            "bits_saved_vs_uniform_ci_p05": float("nan"),
+            "bits_saved_vs_uniform_ci_p95": float("nan"),
+            "denoising_skill_ci_p05": float("nan"),
+            "denoising_skill_ci_p95": float("nan"),
+        }
+
+    uniform_ce = math.log(float(vocab_size))
+    uniform_bits = uniform_ce / math.log(2.0)
     return {
-        "sampled": _view_calibration(summary.get("avg_cross_entropy"), summary.get("bits_per_masked_token"), vocab_size),
-        "timestep_uniform": _view_calibration(
-            summary.get("timestep_uniform_avg_cross_entropy"),
-            summary.get("timestep_uniform_bits_per_masked_token"),
-            vocab_size,
-        ),
-        "schedule_reweighted": _view_calibration(
-            summary.get("schedule_reweighted_avg_cross_entropy"),
-            summary.get("schedule_reweighted_bits_per_masked_token"),
-            vocab_size,
-        ),
-        "grid_uniform": _view_calibration(
-            summary.get("grid_uniform_avg_cross_entropy"),
-            summary.get("grid_uniform_bits_per_masked_token"),
-            vocab_size,
-        ),
-        "timestep_macro": _view_calibration(
-            summary.get("timestep_macro_avg_cross_entropy"),
-            summary.get("timestep_macro_bits_per_masked_token"),
-            vocab_size,
-        ),
-        "timestep_auc": _view_calibration(
-            summary.get("timestep_auc_avg_cross_entropy"),
-            summary.get("timestep_auc_bits_per_masked_token"),
-            vocab_size,
-        ),
+        "bits_saved_vs_uniform_ci_p05": uniform_bits - (ce_p95 / math.log(2.0)),
+        "bits_saved_vs_uniform_ci_p95": uniform_bits - (ce_p05 / math.log(2.0)),
+        "denoising_skill_ci_p05": 1.0 - (ce_p95 / uniform_ce),
+        "denoising_skill_ci_p95": 1.0 - (ce_p05 / uniform_ce),
     }
+
+
+EVAL_CALIBRATION_VIEW_SPECS = {
+    "sampled": {
+        "avg_cross_entropy_key": "avg_cross_entropy",
+        "bits_key": "bits_per_masked_token",
+        "ci_container_key": "confidence_intervals",
+        "ci_ce_key": "avg_cross_entropy",
+    },
+    "timestep_uniform": {
+        "avg_cross_entropy_key": "timestep_uniform_avg_cross_entropy",
+        "bits_key": "timestep_uniform_bits_per_masked_token",
+        "ci_container_key": "timestep_uniform_confidence_intervals",
+        "ci_ce_key": "timestep_uniform_avg_cross_entropy",
+    },
+    "schedule_reweighted": {
+        "avg_cross_entropy_key": "schedule_reweighted_avg_cross_entropy",
+        "bits_key": "schedule_reweighted_bits_per_masked_token",
+        "ci_container_key": "schedule_reweighted_confidence_intervals",
+        "ci_ce_key": "schedule_reweighted_avg_cross_entropy",
+    },
+    "grid_uniform": {
+        "avg_cross_entropy_key": "grid_uniform_avg_cross_entropy",
+        "bits_key": "grid_uniform_bits_per_masked_token",
+        "ci_container_key": "grid_uniform_confidence_intervals",
+        "ci_ce_key": "grid_uniform_avg_cross_entropy",
+    },
+    "timestep_macro": {
+        "avg_cross_entropy_key": "timestep_macro_avg_cross_entropy",
+        "bits_key": "timestep_macro_bits_per_masked_token",
+        "ci_container_key": "timestep_confidence_intervals",
+        "ci_ce_key": "timestep_macro_avg_cross_entropy",
+    },
+    "timestep_auc": {
+        "avg_cross_entropy_key": "timestep_auc_avg_cross_entropy",
+        "bits_key": "timestep_auc_bits_per_masked_token",
+        "ci_container_key": "timestep_confidence_intervals",
+        "ci_ce_key": "timestep_auc_avg_cross_entropy",
+    },
+}
+
+
+def _build_calibration_view_summaries(summary: Dict[str, object]) -> Dict[str, Dict[str, float]]:
+    vocab_size = summary.get("vocab_size")
+    calibration_views: Dict[str, Dict[str, float]] = {}
+    for view_name, spec in EVAL_CALIBRATION_VIEW_SPECS.items():
+        ci_container = summary.get(spec["ci_container_key"]) or {}
+        ce_ci = ci_container.get(spec["ci_ce_key"]) or {}
+        calibration_views[view_name] = {
+            **_view_calibration(
+                summary.get(spec["avg_cross_entropy_key"]),
+                summary.get(spec["bits_key"]),
+                vocab_size,
+            ),
+            **_calibration_interval_from_ce_ci(ce_ci, vocab_size),
+        }
+    return calibration_views
+
+
+def _comparison_calibration_views(summary: Dict[str, object]) -> Dict[str, Dict[str, float]]:
+    return _build_calibration_view_summaries(summary)
 
 
 def _paired_delta_confidence_summary(

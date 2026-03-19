@@ -36,6 +36,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - paired timestep-macro and timestep-AUC bootstrap intervals over the shared diagnostic grid, so equal-weight-over-timestep and trajectory-integral comparisons carry uncertainty too
   - evaluation quality summaries covering schedule-reweighted ESS reliability, timestep-grid coverage, and timestep-remapping status
   - comparison decision summaries that condense winner-confidence over the main pseudo-perplexity / calibration / accuracy views
+  - exported per-view calibration summaries, including confidence-interval bounds for `bits_saved_vs_uniform` and `denoising_skill`
   - per-timestep delta reporting for linear-vs-cosine comparisons
 - `dm_labs/hf_utils.py`
   - reusable Hugging Face model-card + upload helpers
