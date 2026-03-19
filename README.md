@@ -47,6 +47,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - paired bootstrap confidence intervals now also cover calibration deltas (`bits_saved_vs_uniform`, `denoising_skill`) in linear-vs-cosine comparisons, not just CE/PPX/accuracy
   - paired comparison exports now convert bootstrap deltas into winner-confidence summaries (`winner_probability`, `ci_excludes_zero`, `practically_tied`) so schedule claims are explicitly uncertainty-aware
   - Hugging Face export bundling now emits validation metadata, making notebook-to-HF deployment checks easier before upload
+  - notebook-friendly plain-text reporting helpers now summarize the recommended single-model diffusion metric, the primary linear-vs-cosine winner, and HF preflight readiness without requiring manual JSON inspection
 
 ## Project Focus
 

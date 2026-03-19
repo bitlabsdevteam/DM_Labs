@@ -1,9 +1,19 @@
 """DM_Labs utilities for diffusion language model experiments."""
 
-from .hf_utils import ensure_hf_model_card, upload_checkpoint_to_hub, validate_hf_export_bundle, write_eval_summary, write_schedule_comparison
+from .hf_utils import (
+    ensure_hf_model_card,
+    render_eval_summary_report,
+    render_hf_preflight_report,
+    upload_checkpoint_to_hub,
+    validate_hf_export_bundle,
+    write_eval_summary,
+    write_schedule_comparison,
+)
 
 __all__ = [
     "ensure_hf_model_card",
+    "render_eval_summary_report",
+    "render_hf_preflight_report",
     "write_eval_summary",
     "write_schedule_comparison",
     "upload_checkpoint_to_hub",

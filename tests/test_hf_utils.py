@@ -2,7 +2,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from dm_labs.hf_utils import build_eval_view_rows, build_schedule_comparison_rows, ensure_hf_model_card, validate_hf_export_bundle, write_eval_plan, write_hf_export_bundle
+from dm_labs.hf_utils import (
+    build_eval_view_rows,
+    build_schedule_comparison_rows,
+    ensure_hf_model_card,
+    render_eval_summary_report,
+    render_hf_preflight_report,
+    validate_hf_export_bundle,
+    write_eval_plan,
+    write_hf_export_bundle,
+)
 
 
 class HuggingFaceModelCardTests(unittest.TestCase):
@@ -368,6 +377,18 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertEqual(comparison_rows[-1]["bootstrap_p95"], 0.005)
         self.assertEqual(comparison_rows[-1]["probability_linear_better"], 0.15)
 
+        report = render_eval_summary_report(eval_summary=eval_summary, comparison_summary=comparison_summary)
+        self.assertIn("Single-model evaluation", report)
+        self.assertIn("- primary_view: schedule_reweighted_sampled", report)
+        self.assertIn("- primary_metric: schedule_reweighted_pseudo_perplexity = 2.2 (lower is better)", report)
+        self.assertIn("- primary_bits_saved_vs_uniform: 0.8", report)
+        self.assertIn("Linear-vs-cosine comparison", report)
+        self.assertIn("- primary_metric: timestep_auc_pseudo_perplexity", report)
+        self.assertIn("- primary_winner: cosine_schedule", report)
+        self.assertIn("- cosine_value: 2.5", report)
+        self.assertIn("- linear_value: 2.65", report)
+        self.assertIn("- probability_linear_better: 0.25", report)
+
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             (tmp_path / "model.pt").write_bytes(b"stub-model")
@@ -399,6 +420,11 @@ class HuggingFaceModelCardTests(unittest.TestCase):
             self.assertTrue(validation["checks"]["eval_summary_exists"])
             self.assertTrue(validation["checks"]["schedule_comparison_exists"])
             self.assertEqual(validation["missing_required"], [])
+            preflight = render_hf_preflight_report(validation)
+            self.assertIn("Hugging Face export preflight", preflight)
+            self.assertIn("- ready_for_upload: yes", preflight)
+            self.assertIn("- tokenizer_loadable_bundle_present: yes", preflight)
+            self.assertIn("- eval_summary_exists: yes", preflight)
             card_path = ensure_hf_model_card(
                 tmpdir,
                 repo_id="bitlabsdevteam/dm-labs-test",

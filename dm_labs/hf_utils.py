@@ -615,6 +615,123 @@ def summarize_comparison_for_hf(comparison_summary: Optional[dict] = None) -> di
     }
 
 
+def _format_report_scalar(value, digits: int = 6) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "nan"
+        if math.isinf(value):
+            return "inf" if value > 0 else "-inf"
+        return f"{value:.{digits}g}"
+    return str(value)
+
+
+
+def render_eval_summary_report(
+    eval_summary: Optional[dict] = None,
+    comparison_summary: Optional[dict] = None,
+) -> str:
+    lines = []
+
+    eval_snapshot = summarize_eval_for_hf(eval_summary)
+    if eval_snapshot:
+        eval_rows = {row["view"]: row for row in build_eval_view_rows(eval_summary)}
+        primary_view = eval_snapshot.get("primary_view")
+        primary_row = eval_rows.get(primary_view or "", {})
+        lines.extend(
+            [
+                "Single-model evaluation",
+                f"- primary_view: {_format_report_scalar(primary_view)}",
+                f"- primary_metric: {_format_report_scalar(eval_snapshot.get('primary_metric_key'))} = {_format_report_scalar(eval_snapshot.get('primary_metric_value'))} ({_format_report_scalar(eval_snapshot.get('primary_better_direction'))} is better)",
+                f"- schedule_reweighted_reliability: {_format_report_scalar(eval_snapshot.get('schedule_reweighted_reliability'))}",
+                f"- sampled_example_count: {_format_report_scalar(eval_snapshot.get('sampled_example_count'))}",
+                f"- masked_tokens: {_format_report_scalar(eval_snapshot.get('masked_tokens'))}",
+                f"- normalized_timestep_remapping: {_format_report_scalar(eval_snapshot.get('normalized_timestep_remapping'))}",
+            ]
+        )
+        if primary_row:
+            lines.extend(
+                [
+                    f"- primary_bits_per_masked_token: {_format_report_scalar(primary_row.get('bits_per_masked_token'))}",
+                    f"- primary_bits_saved_vs_uniform: {_format_report_scalar(primary_row.get('bits_saved_vs_uniform'))}",
+                    f"- primary_denoising_skill: {_format_report_scalar(primary_row.get('denoising_skill'))}",
+                    f"- primary_masked_token_accuracy: {_format_report_scalar(primary_row.get('masked_token_accuracy'))}",
+                ]
+            )
+        rationale = eval_snapshot.get("primary_rationale")
+        if rationale:
+            lines.append(f"- rationale: {rationale}")
+
+    comparison_snapshot = summarize_comparison_for_hf(comparison_summary)
+    if comparison_snapshot:
+        comparison_rows = {row["metric_view"]: row for row in build_schedule_comparison_rows(comparison_summary)}
+        primary_metric = comparison_snapshot.get("primary_metric")
+        primary_row = comparison_rows.get(primary_metric or "", {})
+        if lines:
+            lines.append("")
+        lines.extend(
+            [
+                "Linear-vs-cosine comparison",
+                f"- headline: {_format_report_scalar(comparison_snapshot.get('headline'))}",
+                f"- primary_metric: {_format_report_scalar(primary_metric)}",
+                f"- primary_view: {_format_report_scalar(comparison_snapshot.get('primary_view'))}",
+                f"- primary_winner: {_format_report_scalar(comparison_snapshot.get('primary_winner'))}",
+                f"- winner_probability: {_format_report_scalar(comparison_snapshot.get('primary_winner_probability'))}",
+                f"- ci_excludes_zero: {_format_report_scalar(comparison_snapshot.get('primary_ci_excludes_zero'))}",
+                f"- practically_tied: {_format_report_scalar(comparison_snapshot.get('primary_practically_tied'))}",
+                f"- delta_linear_minus_cosine: {_format_report_scalar(comparison_snapshot.get('primary_delta_linear_minus_cosine'))}",
+                f"- normalized_timestep_remapping: {_format_report_scalar(comparison_snapshot.get('normalized_timestep_remapping'))}",
+            ]
+        )
+        if primary_row:
+            lines.extend(
+                [
+                    f"- cosine_value: {_format_report_scalar(primary_row.get('cosine_value'))}",
+                    f"- linear_value: {_format_report_scalar(primary_row.get('linear_value'))}",
+                    f"- better_direction: {_format_report_scalar(primary_row.get('better_direction'))}",
+                    f"- bootstrap_p05: {_format_report_scalar(primary_row.get('bootstrap_p05'))}",
+                    f"- bootstrap_p95: {_format_report_scalar(primary_row.get('bootstrap_p95'))}",
+                    f"- probability_linear_better: {_format_report_scalar(primary_row.get('probability_linear_better'))}",
+                ]
+            )
+
+    return "\n".join(lines)
+
+
+
+def render_hf_preflight_report(validation: Optional[dict] = None) -> str:
+    validation = validation or {}
+    checks = validation.get("checks") or {}
+    missing_required = validation.get("missing_required") or []
+    warnings = validation.get("warnings") or []
+    lines = [
+        "Hugging Face export preflight",
+        f"- repo_id: {_format_report_scalar(validation.get('repo_id'))}",
+        f"- local_artifact_dir: {_format_report_scalar(validation.get('local_artifact_dir'))}",
+        f"- ready_for_upload: {_format_report_scalar(validation.get('ready_for_upload'))}",
+        f"- model_exists: {_format_report_scalar(checks.get('model_exists'))}",
+        f"- config_exists: {_format_report_scalar(checks.get('config_exists'))}",
+        f"- tokenizer_loadable_bundle_present: {_format_report_scalar(checks.get('tokenizer_loadable_bundle_present'))}",
+        f"- readme_exists: {_format_report_scalar(checks.get('readme_exists'))}",
+        f"- manifest_exists: {_format_report_scalar(checks.get('manifest_exists'))}",
+        f"- eval_summary_exists: {_format_report_scalar(checks.get('eval_summary_exists'))}",
+        f"- schedule_comparison_exists: {_format_report_scalar(checks.get('schedule_comparison_exists'))}",
+        f"- eval_plan_exists: {_format_report_scalar(checks.get('eval_plan_exists'))}",
+    ]
+    if missing_required:
+        lines.append(f"- missing_required: {', '.join(missing_required)}")
+    if warnings:
+        lines.append("- warnings:")
+        lines.extend([f"  - {warning}" for warning in warnings])
+    return "\n".join(lines)
+
+
+
 def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = None) -> dict:
     local_artifact_dir = Path(local_artifact_dir)
     manifest_path = local_artifact_dir / "hf_export_manifest.json"
