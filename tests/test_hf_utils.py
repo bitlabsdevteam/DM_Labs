@@ -369,6 +369,12 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertEqual(comparison_rows[-1]["probability_linear_better"], 0.15)
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            (tmp_path / "model.pt").write_bytes(b"stub-model")
+            (tmp_path / "config.json").write_text('{"diffusion_steps": 64}', encoding="utf-8")
+            (tmp_path / "tokenizer.json").write_text('{"version":"1.0"}', encoding="utf-8")
+            (tmp_path / "tokenizer_config.json").write_text('{"model_max_length":64}', encoding="utf-8")
+            (tmp_path / "special_tokens_map.json").write_text('{"pad_token":"<pad>"}', encoding="utf-8")
             eval_plan_path = write_eval_plan(tmpdir, eval_plan={"n_batches": 3, "T": 64, "timestep_grid": [1, 16, 32, 48, 64], "seed": 7, "batches": []})
             self.assertTrue(Path(eval_plan_path).exists())
             bundle = write_hf_export_bundle(
@@ -383,10 +389,16 @@ class HuggingFaceModelCardTests(unittest.TestCase):
             self.assertTrue(Path(bundle["eval_plan_path"]).exists())
             self.assertTrue(bundle["validation"]["ready_for_upload"])
             self.assertTrue(bundle["validation"]["checks"]["manifest_repo_id_matches"])
+            self.assertTrue(bundle["validation"]["checks"]["model_exists"])
+            self.assertTrue(bundle["validation"]["checks"]["config_exists"])
+            self.assertTrue(bundle["validation"]["checks"]["tokenizer_loadable_bundle_present"])
+            self.assertEqual(bundle["eval_snapshot"]["primary_metric_key"], "schedule_reweighted_pseudo_perplexity")
+            self.assertEqual(bundle["comparison_snapshot"]["primary_metric"], "timestep_auc_pseudo_perplexity")
             validation = validate_hf_export_bundle(tmpdir, repo_id="bitlabsdevteam/dm-labs-test")
             self.assertTrue(validation["ready_for_upload"])
             self.assertTrue(validation["checks"]["eval_summary_exists"])
             self.assertTrue(validation["checks"]["schedule_comparison_exists"])
+            self.assertEqual(validation["missing_required"], [])
             card_path = ensure_hf_model_card(
                 tmpdir,
                 repo_id="bitlabsdevteam/dm-labs-test",
@@ -407,6 +419,9 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("- schedule_reweighted_reliability: strong", content)
         self.assertIn("  - view: schedule_reweighted_sampled", content)
         self.assertIn("  - metric_key: schedule_reweighted_pseudo_perplexity", content)
+        self.assertIn("## Export bundle snapshot", content)
+        self.assertIn("  - primary_metric_key: schedule_reweighted_pseudo_perplexity", content)
+        self.assertIn("  - primary_metric: timestep_auc_pseudo_perplexity", content)
         self.assertIn("Sampled evaluation covers 12 per-example corruption draws and 48 masked tokens.", content)
         self.assertIn("- optional `eval_plan.pt` shared cached evaluation plan artifact", content)
         self.assertIn("- optional `hf_export_manifest.json` bundle manifest covering all exported metadata files", content)

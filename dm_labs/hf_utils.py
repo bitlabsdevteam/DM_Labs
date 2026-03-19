@@ -539,6 +539,82 @@ def write_eval_plan(local_artifact_dir: str, eval_plan=None) -> Optional[str]:
     return str(out_path)
 
 
+def inspect_hf_artifact_dir(local_artifact_dir: str) -> dict:
+    local_artifact_dir = Path(local_artifact_dir)
+    model_path = local_artifact_dir / "model.pt"
+    config_path = local_artifact_dir / "config.json"
+    tokenizer_candidates = {
+        "tokenizer_json": local_artifact_dir / "tokenizer.json",
+        "tokenizer_config_json": local_artifact_dir / "tokenizer_config.json",
+        "special_tokens_map_json": local_artifact_dir / "special_tokens_map.json",
+        "vocab_json": local_artifact_dir / "vocab.json",
+        "merges_txt": local_artifact_dir / "merges.txt",
+    }
+    tokenizer_present = {name: path.exists() for name, path in tokenizer_candidates.items()}
+    tokenizer_family = {
+        "fast_tokenizer_bundle": bool(tokenizer_present["tokenizer_json"] and tokenizer_present["tokenizer_config_json"]),
+        "bpe_vocab_merge_pair": bool(tokenizer_present["vocab_json"] and tokenizer_present["merges_txt"]),
+        "special_tokens_map": bool(tokenizer_present["special_tokens_map_json"]),
+    }
+    return {
+        "local_artifact_dir": str(local_artifact_dir),
+        "model_path": str(model_path),
+        "config_path": str(config_path),
+        "tokenizer_paths": {name: str(path) for name, path in tokenizer_candidates.items()},
+        "checks": {
+            "artifact_dir_exists": local_artifact_dir.exists(),
+            "model_exists": model_path.exists(),
+            "config_exists": config_path.exists(),
+            **tokenizer_present,
+            "tokenizer_assets_present": bool(any(tokenizer_present.values())),
+            "tokenizer_loadable_bundle_present": bool(tokenizer_family["fast_tokenizer_bundle"] or tokenizer_family["bpe_vocab_merge_pair"]),
+            "special_tokens_map_present": tokenizer_family["special_tokens_map"],
+        },
+    }
+
+
+def summarize_eval_for_hf(eval_summary: Optional[dict] = None) -> dict:
+    if not eval_summary:
+        return {}
+    quality_summary = eval_summary.get("quality_summary") or {}
+    primary = quality_summary.get("recommended_primary_view") or {}
+    metric_key = primary.get("metric_key")
+    return {
+        "metric": eval_summary.get("metric"),
+        "primary_view": primary.get("view"),
+        "primary_metric_key": metric_key,
+        "primary_metric_value": eval_summary.get(metric_key) if metric_key else None,
+        "primary_better_direction": primary.get("better_direction"),
+        "primary_rationale": primary.get("rationale"),
+        "schedule_reweighted_reliability": quality_summary.get("schedule_reweighted_reliability"),
+        "schedule_reweighted_effective_sample_size_fraction": eval_summary.get("schedule_reweighted_effective_sample_size_fraction"),
+        "sampled_example_count": eval_summary.get("sampled_example_count"),
+        "masked_tokens": eval_summary.get("masked_tokens"),
+        "normalized_timestep_remapping": bool((eval_summary.get("eval_protocol") or {}).get("normalized_timestep_remapping", False)),
+    }
+
+
+def summarize_comparison_for_hf(comparison_summary: Optional[dict] = None) -> dict:
+    if not comparison_summary:
+        return {}
+    decision_summary = comparison_summary.get("decision_summary") or {}
+    primary = decision_summary.get("recommended_primary_metric") or {}
+    metric_key = primary.get("metric")
+    return {
+        "headline": decision_summary.get("headline"),
+        "primary_metric": metric_key,
+        "primary_view": primary.get("view"),
+        "primary_winner": primary.get("winner"),
+        "primary_winner_probability": primary.get("winner_probability"),
+        "primary_ci_excludes_zero": primary.get("ci_excludes_zero"),
+        "primary_practically_tied": primary.get("practically_tied"),
+        "primary_delta_linear_minus_cosine": (comparison_summary.get("delta") or {}).get(metric_key) if metric_key else None,
+        "normalized_timestep_remapping": bool((comparison_summary.get("comparison_protocol") or {}).get("normalized_timestep_remapping", False)),
+        "tracked_metric_count": decision_summary.get("tracked_metric_count"),
+        "decisive_metric_count": decision_summary.get("decisive_metric_count"),
+    }
+
+
 def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = None) -> dict:
     local_artifact_dir = Path(local_artifact_dir)
     manifest_path = local_artifact_dir / "hf_export_manifest.json"
@@ -551,6 +627,7 @@ def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = 
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
+    artifact_inspection = inspect_hf_artifact_dir(local_artifact_dir)
     checks = {
         "artifact_dir_exists": local_artifact_dir.exists(),
         "readme_exists": readme_path.exists(),
@@ -559,17 +636,40 @@ def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = 
         "schedule_comparison_exists": comparison_path.exists(),
         "eval_plan_exists": eval_plan_path.exists(),
         "manifest_repo_id_matches": (repo_id is None) or (manifest.get("repo_id") == repo_id),
+        **artifact_inspection.get("checks", {}),
     }
+    missing_required = [
+        name for name in [
+            "artifact_dir_exists",
+            "readme_exists",
+            "manifest_exists",
+            "manifest_repo_id_matches",
+            "model_exists",
+            "config_exists",
+        ]
+        if not checks.get(name)
+    ]
+    warnings = []
+    if not checks.get("tokenizer_assets_present"):
+        warnings.append("Tokenizer assets were not found in the artifact directory.")
+    elif not checks.get("tokenizer_loadable_bundle_present"):
+        warnings.append("Some tokenizer files exist, but the bundle may be incomplete for AutoTokenizer loading.")
+    if not checks.get("special_tokens_map_present"):
+        warnings.append("special_tokens_map.json is missing; upload may still work, but tokenizer behavior can be less explicit.")
+
     return {
         "repo_id": repo_id or manifest.get("repo_id"),
         "local_artifact_dir": str(local_artifact_dir),
         "checks": checks,
-        "ready_for_upload": bool(checks["artifact_dir_exists"] and checks["readme_exists"] and checks["manifest_exists"] and checks["manifest_repo_id_matches"]),
+        "missing_required": missing_required,
+        "warnings": warnings,
+        "ready_for_upload": bool(not missing_required),
         "manifest_path": str(manifest_path),
         "readme_path": str(readme_path),
         "eval_summary_path": str(eval_summary_path) if eval_summary_path.exists() else None,
         "comparison_summary_path": str(comparison_path) if comparison_path.exists() else None,
         "eval_plan_path": str(eval_plan_path) if eval_plan_path.exists() else None,
+        "artifact_inspection": artifact_inspection,
     }
 
 
@@ -605,6 +705,8 @@ def write_hf_export_bundle(
         "has_eval_summary": eval_summary is not None,
         "has_comparison_summary": comparison_summary is not None,
         "has_eval_plan": eval_plan is not None,
+        "eval_snapshot": summarize_eval_for_hf(eval_summary),
+        "comparison_snapshot": summarize_comparison_for_hf(comparison_summary),
     }
     manifest_path = local_artifact_dir / "hf_export_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -630,6 +732,7 @@ def ensure_hf_model_card(
     quality_block = ""
     comparison_block = ""
     decision_block = ""
+    export_snapshot_block = ""
     if eval_summary:
         eval_rows = build_eval_view_rows(eval_summary)
         metrics_lines = [
@@ -714,6 +817,35 @@ def ensure_hf_model_card(
                 quality_lines.append("- warnings:")
                 quality_lines.extend([f"  - {warning}" for warning in warnings])
             quality_block = "\n".join(quality_lines) + "\n"
+
+    eval_snapshot = summarize_eval_for_hf(eval_summary)
+    comparison_snapshot = summarize_comparison_for_hf(comparison_summary)
+    if eval_snapshot or comparison_snapshot:
+        snapshot_lines = ["\n## Export bundle snapshot\n"]
+        if eval_snapshot:
+            snapshot_lines.extend(
+                [
+                    "- eval_snapshot:",
+                    f"  - primary_view: {eval_snapshot.get('primary_view')}",
+                    f"  - primary_metric_key: {eval_snapshot.get('primary_metric_key')}",
+                    f"  - primary_metric_value: {eval_snapshot.get('primary_metric_value')}",
+                    f"  - schedule_reweighted_reliability: {eval_snapshot.get('schedule_reweighted_reliability')}",
+                    f"  - normalized_timestep_remapping: {eval_snapshot.get('normalized_timestep_remapping')}",
+                ]
+            )
+        if comparison_snapshot:
+            snapshot_lines.extend(
+                [
+                    "- comparison_snapshot:",
+                    f"  - headline: {comparison_snapshot.get('headline')}",
+                    f"  - primary_metric: {comparison_snapshot.get('primary_metric')}",
+                    f"  - primary_winner: {comparison_snapshot.get('primary_winner')}",
+                    f"  - primary_winner_probability: {comparison_snapshot.get('primary_winner_probability')}",
+                    f"  - primary_practically_tied: {comparison_snapshot.get('primary_practically_tied')}",
+                    f"  - normalized_timestep_remapping: {comparison_snapshot.get('normalized_timestep_remapping')}",
+                ]
+            )
+        export_snapshot_block = "\n".join(snapshot_lines) + "\n"
 
     comparison_rows = build_schedule_comparison_rows(comparison_summary)
     if comparison_rows:
@@ -803,7 +935,7 @@ This model repo contains artifacts exported from the DM_Labs notebook for a disc
 - optional `hf_export_manifest.json` bundle manifest covering all exported metadata files
 - optional schedule-comparison JSON artifacts
 - optional bundle validation metadata inside `hf_export_manifest.json`
-{metrics_block}{protocol_block}{quality_block}{comparison_block}{decision_block}## Evaluation note
+{metrics_block}{protocol_block}{quality_block}{export_snapshot_block}{comparison_block}{decision_block}## Evaluation note
 
 The reported pseudo-perplexity is based on masked-token denoising NLL under a diffusion corruption process. It is **not** autoregressive next-token perplexity.
 
