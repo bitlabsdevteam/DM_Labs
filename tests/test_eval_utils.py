@@ -70,6 +70,7 @@ class EvalPlanRemapTests(unittest.TestCase):
         self.assertAlmostEqual(result["calibration"]["sampled"]["denoising_skill"], 0.0, places=6)
         self.assertIn("quality_summary", result)
         self.assertIn("schedule_reweighted_reliability", result["quality_summary"])
+        self.assertEqual(result["quality_summary"]["recommended_primary_view"]["metric_key"], "schedule_reweighted_pseudo_perplexity")
 
     def test_timestep_auc_matches_constant_metric_surface(self):
         plan = {
@@ -261,6 +262,9 @@ class ScheduleComparisonRemapTests(unittest.TestCase):
         self.assertIn("decision_summary", comparison)
         self.assertIn("headline", comparison["decision_summary"])
         self.assertIn("tracked_metrics", comparison["decision_summary"])
+        self.assertIn("recommended_primary_metric", comparison["decision_summary"])
+        self.assertEqual(comparison["decision_summary"]["recommended_primary_metric"]["metric"], "timestep_auc_pseudo_perplexity")
+        self.assertIn("common normalized timestep grid", comparison["decision_summary"]["recommended_primary_metric"]["rationale"])
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - paired timestep-macro and timestep-AUC bootstrap intervals over the shared diagnostic grid, so equal-weight-over-timestep and trajectory-integral comparisons carry uncertainty too
   - evaluation quality summaries covering schedule-reweighted ESS reliability, timestep-grid coverage, and timestep-remapping status
   - comparison decision summaries that condense winner-confidence over the main pseudo-perplexity / calibration / accuracy views
+  - explicit primary-metric recommendations for both single-model evals and cosine-vs-linear comparisons, including conservative fallback to timestep-AUC when schedule comparisons require normalized timestep remapping
   - exported per-view calibration summaries, including confidence-interval bounds for `bits_saved_vs_uniform` and `denoising_skill`
   - per-timestep delta reporting for linear-vs-cosine comparisons
 - `dm_labs/hf_utils.py`
@@ -87,7 +88,9 @@ Current protocol improvements in the repo:
 - attach **timestep-grid bootstrap intervals** for both **timestep-macro** and **timestep-AUC** denoising summaries in single-model eval artifacts
 - attach **paired timestep-macro and timestep-AUC bootstrap intervals** so equal-weight-over-timestep and trajectory-level schedule claims are uncertainty-aware too
 - emit an explicit **evaluation quality summary** so users can see whether schedule-reweighted views are statistically strong or fragile before leaning on them
+- recommend a **primary diffusion perplexity-style metric** for each single-model evaluation artifact, rather than forcing users to guess between sampled, reweighted, and fixed-grid summaries
 - emit a compact **schedule decision summary** so notebook/HF outputs show whether cosine-vs-linear differences are decisive or still practically tied across the headline views
+- recommend a **primary cosine-vs-linear comparison metric** that conservatively falls back to normalized-timestep **timestep-AUC pseudo-perplexity** when the two checkpoints only line up via timestep remapping across different diffusion step counts
 - surface a **normalized timestep-fraction AUC** view so schedule comparisons can summarize the denoising trajectory without depending on equal timestep spacing
 - expose a **fixed-grid shared-timestep aggregate** plus paired uncertainty so cosine-vs-linear claims can be checked on an explicit common denoising surface
 - persist evaluation protocol metadata into exported JSON and Hugging Face upload artifacts

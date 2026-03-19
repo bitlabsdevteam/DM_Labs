@@ -1644,6 +1644,57 @@ def _schedule_reweighted_reliability_bucket(effective_sample_size_fraction: floa
     return "fragile"
 
 
+def _recommend_primary_eval_view(result: Dict[str, object]) -> Dict[str, object]:
+    quality_summary = result.get("quality_summary") or {}
+    sampled_example_count = int(result.get("sampled_example_count", 0) or 0)
+    timestep_count = int(result.get("timestep_macro_timestep_count", 0) or 0)
+    grid_count = len(result.get("grid_batch_metrics") or [])
+    ess_bucket = quality_summary.get("schedule_reweighted_reliability") or _schedule_reweighted_reliability_bucket(
+        result.get("schedule_reweighted_effective_sample_size_fraction")
+    )
+
+    if sampled_example_count > 0 and ess_bucket in {"strong", "usable"}:
+        return {
+            "view": "schedule_reweighted_sampled",
+            "metric_key": "schedule_reweighted_pseudo_perplexity",
+            "better_direction": "lower",
+            "rationale": "Use the schedule-reweighted sampled pseudo-perplexity as the primary diffusion perplexity-style metric because it directly estimates a uniform-over-mask-eligible-token-and-timestep denoising objective and the ESS diagnostic is not fragile.",
+            "caveat": None if ess_bucket == "strong" else "ESS is usable rather than strong, so small deltas should still be cross-checked against timestep-AUC or timestep-uniform views.",
+        }
+    if timestep_count >= 3:
+        return {
+            "view": "fixed_grid_timestep_auc",
+            "metric_key": "timestep_auc_pseudo_perplexity",
+            "better_direction": "lower",
+            "rationale": "Use the fixed-grid timestep-AUC pseudo-perplexity as the primary fallback because it integrates over normalized timestep fraction on an explicit shared grid and is less sensitive to fragile importance weights.",
+            "caveat": "This is a grid diagnostic rather than a sampled objective estimate, so keep the schedule-reweighted view visible when its ESS becomes strong.",
+        }
+    if sampled_example_count > 0:
+        return {
+            "view": "timestep_uniform_sampled",
+            "metric_key": "timestep_uniform_pseudo_perplexity",
+            "better_direction": "lower",
+            "rationale": "Use the timestep-uniform sampled pseudo-perplexity as the primary fallback because it keeps equal top-level weight on sampled timesteps without relying on inverse-mask-ratio importance weights.",
+            "caveat": "This view is less target-faithful than schedule-reweighted evaluation when ESS is strong.",
+        }
+    if grid_count > 0:
+        return {
+            "view": "fixed_grid_batch_uniform",
+            "metric_key": "grid_uniform_pseudo_perplexity",
+            "better_direction": "lower",
+            "rationale": "Use the fixed-grid batch-uniform pseudo-perplexity as a last-resort fallback because sampled per-example metrics were unavailable but cached grid diagnostics exist.",
+            "caveat": "This should be treated as a coarse diagnostic summary, not a preferred primary metric.",
+        }
+    return {
+        "view": "token_weighted_sampled",
+        "metric_key": "pseudo_perplexity",
+        "better_direction": "lower",
+        "rationale": "Fallback to token-weighted sampled pseudo-perplexity because no stronger schedule-corrected or grid-integrated diagnostic was available.",
+        "caveat": "Interpret carefully; this view can be more sensitive to schedule-dependent mask-count profiles.",
+    }
+
+
+
 def _build_eval_quality_summary(result: Dict[str, object]) -> Dict[str, object]:
     protocol = result.get("eval_protocol") or {}
     notes: List[str] = []
@@ -1679,6 +1730,8 @@ def _build_eval_quality_summary(result: Dict[str, object]) -> Dict[str, object]:
     else:
         warnings.append("Schedule-reweighted sampled evaluation did not produce a finite effective sample size diagnostic.")
 
+    primary_view = _recommend_primary_eval_view({**result, "quality_summary": {"schedule_reweighted_reliability": ess_bucket}})
+
     return {
         "sampled_example_count": sampled_example_count,
         "masked_tokens": masked_tokens,
@@ -1687,14 +1740,62 @@ def _build_eval_quality_summary(result: Dict[str, object]) -> Dict[str, object]:
         "schedule_reweighted_effective_sample_size_fraction": ess_fraction,
         "schedule_reweighted_reliability": ess_bucket,
         "normalized_timestep_remapping": bool(protocol.get("normalized_timestep_remapping", False)),
+        "recommended_primary_view": primary_view,
         "notes": notes,
         "warnings": warnings,
     }
 
 
+def _recommend_comparison_primary_metric(comparison: Dict[str, object]) -> Dict[str, object]:
+    protocol = comparison.get("comparison_protocol") or {}
+    models = comparison.get("models") or []
+    cosine_quality = ((models[0].get("quality_summary") or {}) if len(models) > 0 else {})
+    linear_quality = ((models[1].get("quality_summary") or {}) if len(models) > 1 else {})
+    cosine_primary = cosine_quality.get("recommended_primary_view") or {}
+    linear_primary = linear_quality.get("recommended_primary_view") or {}
+
+    default_primary = {
+        "metric": "timestep_auc_pseudo_perplexity",
+        "view": "fixed_grid_timestep_auc",
+        "rationale": "Default to timestep-AUC pseudo-perplexity for conservative shared comparison behavior.",
+    }
+
+    if protocol.get("normalized_timestep_remapping"):
+        return {
+            **default_primary,
+            "rationale": "The comparison remaps timesteps across different diffusion step counts, so timestep-AUC pseudo-perplexity is the safest shared primary metric because it integrates over a common normalized timestep grid instead of relying on schedule-specific sampled weights.",
+        }
+
+    cosine_metric = cosine_primary.get("metric_key")
+    linear_metric = linear_primary.get("metric_key")
+    if cosine_metric and cosine_metric == linear_metric:
+        return {
+            "metric": str(cosine_metric),
+            "view": str(cosine_primary.get("view") or linear_primary.get("view") or "fixed_grid_timestep_auc"),
+            "rationale": str(cosine_primary.get("rationale") or linear_primary.get("rationale") or default_primary["rationale"]),
+        }
+    if "schedule_reweighted_pseudo_perplexity" in {cosine_metric, linear_metric}:
+        return {
+            **default_primary,
+            "rationale": "The two schedules disagree on whether schedule-reweighted sampled evaluation is reliable enough to be primary, so the comparison falls back to the shared conservative timestep-AUC view.",
+        }
+    if cosine_metric or linear_metric:
+        return {
+            "metric": str(cosine_metric or linear_metric),
+            "view": str(cosine_primary.get("view") or linear_primary.get("view") or "fixed_grid_timestep_auc"),
+            "rationale": "The comparison inherits the only available primary-view recommendation from the evaluated checkpoints.",
+        }
+    return default_primary
+
+
 def _build_comparison_decision_summary(comparison: Dict[str, object]) -> Dict[str, object]:
     winner = comparison.get("winner") or {}
     confidence = comparison.get("winner_confidence") or {}
+    primary_metric = _recommend_comparison_primary_metric(comparison)
+    primary_metric_key = str(primary_metric.get("metric") or "timestep_auc_pseudo_perplexity")
+    primary_metric_view = str(primary_metric.get("view") or "fixed_grid_timestep_auc")
+    primary_rationale = str(primary_metric.get("rationale") or "Default to timestep-AUC pseudo-perplexity for conservative shared comparison behavior.")
+
     tracked_metrics = [
         ("sampled_pseudo_perplexity", "pseudo_perplexity", "lower"),
         ("timestep_uniform_pseudo_perplexity", "timestep_uniform_pseudo_perplexity", "lower"),
@@ -1735,10 +1836,18 @@ def _build_comparison_decision_summary(comparison: Dict[str, object]) -> Dict[st
                 "winner_probability": winner_probability,
                 "ci_excludes_zero": ci_excludes_zero,
                 "practically_tied": practically_tied,
+                "is_recommended_primary_metric": bool(key == primary_metric_key),
             }
         )
 
-    if cosine_wins > linear_wins:
+    primary_conf = confidence.get(primary_metric_key) or {}
+    primary_winner = winner.get(primary_metric_key)
+    primary_decisive = bool(primary_conf.get("ci_excludes_zero", False))
+    if primary_decisive and primary_winner == "cosine_schedule":
+        headline = "cosine_schedule_leads_on_primary_metric"
+    elif primary_decisive and primary_winner == "linear_schedule_baseline":
+        headline = "linear_schedule_leads_on_primary_metric"
+    elif cosine_wins > linear_wins:
         headline = "cosine_schedule_leads"
     elif linear_wins > cosine_wins:
         headline = "linear_schedule_leads"
@@ -1752,6 +1861,15 @@ def _build_comparison_decision_summary(comparison: Dict[str, object]) -> Dict[st
         "practically_tied_metric_count": tied,
         "cosine_schedule_win_count": cosine_wins,
         "linear_schedule_win_count": linear_wins,
+        "recommended_primary_metric": {
+            "metric": primary_metric_key,
+            "view": primary_metric_view,
+            "winner": primary_winner,
+            "winner_probability": primary_conf.get("winner_probability"),
+            "ci_excludes_zero": primary_conf.get("ci_excludes_zero"),
+            "practically_tied": primary_conf.get("practically_tied"),
+            "rationale": primary_rationale,
+        },
         "tracked_metrics": rows,
     }
 

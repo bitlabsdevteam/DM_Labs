@@ -683,6 +683,7 @@ def ensure_hf_model_card(
             )
         quality_summary = eval_summary.get("quality_summary") or {}
         if quality_summary:
+            recommended_primary_view = quality_summary.get("recommended_primary_view") or {}
             quality_lines = [
                 "\n## Evaluation quality summary\n",
                 f"- schedule_reweighted_reliability: {quality_summary.get('schedule_reweighted_reliability')}",
@@ -693,6 +694,17 @@ def ensure_hf_model_card(
                 f"- timestep_macro_timestep_count: {quality_summary.get('timestep_macro_timestep_count')}",
                 f"- normalized_timestep_remapping: {quality_summary.get('normalized_timestep_remapping')}",
             ]
+            if recommended_primary_view:
+                quality_lines.extend(
+                    [
+                        "- recommended_primary_view:",
+                        f"  - view: {recommended_primary_view.get('view')}",
+                        f"  - metric_key: {recommended_primary_view.get('metric_key')}",
+                        f"  - better_direction: {recommended_primary_view.get('better_direction')}",
+                        f"  - rationale: {recommended_primary_view.get('rationale')}",
+                        f"  - caveat: {recommended_primary_view.get('caveat')}",
+                    ]
+                )
             notes = quality_summary.get("notes") or []
             warnings = quality_summary.get("warnings") or []
             if notes:
@@ -730,6 +742,7 @@ def ensure_hf_model_card(
         comparison_block = "\n".join(comparison_lines) + "\n"
         decision_summary = comparison_summary.get("decision_summary") or {}
         if decision_summary:
+            recommended_primary_metric = decision_summary.get('recommended_primary_metric') or {}
             decision_lines = [
                 "\n## Schedule decision summary\n",
                 f"- headline: {decision_summary.get('headline')}",
@@ -739,16 +752,29 @@ def ensure_hf_model_card(
                 f"- cosine_schedule_win_count: {decision_summary.get('cosine_schedule_win_count')}",
                 f"- linear_schedule_win_count: {decision_summary.get('linear_schedule_win_count')}",
             ]
+            if recommended_primary_metric:
+                decision_lines.extend(
+                    [
+                        "- recommended_primary_metric:",
+                        f"  - metric: {recommended_primary_metric.get('metric')}",
+                        f"  - view: {recommended_primary_metric.get('view')}",
+                        f"  - winner: {recommended_primary_metric.get('winner')}",
+                        f"  - winner_probability: {recommended_primary_metric.get('winner_probability')}",
+                        f"  - ci_excludes_zero: {recommended_primary_metric.get('ci_excludes_zero')}",
+                        f"  - practically_tied: {recommended_primary_metric.get('practically_tied')}",
+                        f"  - rationale: {recommended_primary_metric.get('rationale')}",
+                    ]
+                )
             tracked = decision_summary.get('tracked_metrics') or []
             if tracked:
                 decision_lines.extend([
                     "",
-                    "| metric | winner | better_direction | winner_probability | ci_excludes_zero | practically_tied |",
-                    "| --- | --- | --- | ---: | --- | --- |",
+                    "| metric | winner | better_direction | winner_probability | ci_excludes_zero | practically_tied | recommended_primary |",
+                    "| --- | --- | --- | ---: | --- | --- | --- |",
                 ])
                 for row in tracked:
                     decision_lines.append(
-                        f"| {row.get('metric')} | {row.get('winner')} | {row.get('better_direction')} | {row.get('winner_probability')} | {row.get('ci_excludes_zero')} | {row.get('practically_tied')} |"
+                        f"| {row.get('metric')} | {row.get('winner')} | {row.get('better_direction')} | {row.get('winner_probability')} | {row.get('ci_excludes_zero')} | {row.get('practically_tied')} | {row.get('is_recommended_primary_metric')} |"
                     )
             decision_block = "\n".join(decision_lines) + "\n"
 

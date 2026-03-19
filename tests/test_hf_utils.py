@@ -99,6 +99,13 @@ class HuggingFaceModelCardTests(unittest.TestCase):
                 "schedule_reweighted_effective_sample_size_fraction": 0.875,
                 "schedule_reweighted_reliability": "strong",
                 "normalized_timestep_remapping": False,
+                "recommended_primary_view": {
+                    "view": "schedule_reweighted_sampled",
+                    "metric_key": "schedule_reweighted_pseudo_perplexity",
+                    "better_direction": "lower",
+                    "rationale": "Use the schedule-reweighted sampled pseudo-perplexity as the primary diffusion perplexity-style metric because it directly estimates a uniform-over-mask-eligible-token-and-timestep denoising objective and the ESS diagnostic is not fragile.",
+                    "caveat": None,
+                },
                 "notes": ["Sampled evaluation covers 12 per-example corruption draws and 48 masked tokens."],
                 "warnings": [],
             },
@@ -249,9 +256,18 @@ class HuggingFaceModelCardTests(unittest.TestCase):
                 "practically_tied_metric_count": 10,
                 "cosine_schedule_win_count": 10,
                 "linear_schedule_win_count": 0,
+                "recommended_primary_metric": {
+                    "metric": "timestep_auc_pseudo_perplexity",
+                    "view": "fixed_grid_timestep_auc",
+                    "winner": "cosine_schedule",
+                    "winner_probability": 0.75,
+                    "ci_excludes_zero": False,
+                    "practically_tied": True,
+                    "rationale": "Default to timestep-AUC pseudo-perplexity for conservative shared comparison behavior.",
+                },
                 "tracked_metrics": [
-                    {"metric": "sampled_pseudo_perplexity", "winner": "cosine_schedule", "better_direction": "lower", "winner_probability": 0.8, "ci_excludes_zero": False, "practically_tied": True},
-                    {"metric": "schedule_reweighted_pseudo_perplexity", "winner": "cosine_schedule", "better_direction": "lower", "winner_probability": 0.78, "ci_excludes_zero": False, "practically_tied": True}
+                    {"metric": "sampled_pseudo_perplexity", "winner": "cosine_schedule", "better_direction": "lower", "winner_probability": 0.8, "ci_excludes_zero": False, "practically_tied": True, "is_recommended_primary_metric": False},
+                    {"metric": "schedule_reweighted_pseudo_perplexity", "winner": "cosine_schedule", "better_direction": "lower", "winner_probability": 0.78, "ci_excludes_zero": False, "practically_tied": True, "is_recommended_primary_metric": False}
                 ],
             },
         }
@@ -389,6 +405,8 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("- schedule_reweighted_aggregation: inverse_expected_mask_ratio_weighting_over_sampled_masked_tokens", content)
         self.assertIn("## Evaluation quality summary", content)
         self.assertIn("- schedule_reweighted_reliability: strong", content)
+        self.assertIn("  - view: schedule_reweighted_sampled", content)
+        self.assertIn("  - metric_key: schedule_reweighted_pseudo_perplexity", content)
         self.assertIn("Sampled evaluation covers 12 per-example corruption draws and 48 masked tokens.", content)
         self.assertIn("- optional `eval_plan.pt` shared cached evaluation plan artifact", content)
         self.assertIn("- optional `hf_export_manifest.json` bundle manifest covering all exported metadata files", content)
@@ -399,7 +417,8 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("| schedule_reweighted_accuracy | higher | 0.42 | 0.398 | -0.022 | cosine_schedule | 0.88 | False | True | -0.042 | 0.002 | 0.12 |", content)
         self.assertIn("## Schedule decision summary", content)
         self.assertIn("- headline: cosine_schedule_leads", content)
-        self.assertIn("| sampled_pseudo_perplexity | cosine_schedule | lower | 0.8 | False | True |", content)
+        self.assertIn("  - metric: timestep_auc_pseudo_perplexity", content)
+        self.assertIn("| sampled_pseudo_perplexity | cosine_schedule | lower | 0.8 | False | True | False |", content)
 
 
 if __name__ == "__main__":
