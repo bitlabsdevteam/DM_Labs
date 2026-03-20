@@ -3,6 +3,8 @@ import unittest
 from pathlib import Path
 
 from dm_labs.hf_utils import (
+    build_comparison_protocol_rows,
+    build_eval_protocol_rows,
     build_eval_view_rows,
     build_schedule_comparison_rows,
     ensure_hf_model_card,
@@ -345,7 +347,14 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         }
 
         eval_rows = build_eval_view_rows(eval_summary)
+        eval_protocol_rows = build_eval_protocol_rows(eval_summary)
         self.assertEqual(eval_rows[0]["view"], "token_weighted_sampled")
+        self.assertIn("estimand", eval_rows[0])
+        self.assertIn("sample_axis", eval_rows[0])
+        self.assertIn("weighting", eval_rows[0])
+        self.assertEqual(eval_protocol_rows[2]["view"], "schedule_reweighted_sampled")
+        self.assertTrue(eval_protocol_rows[2]["is_recommended_primary_view"])
+        self.assertIn("uniform-over-eligible-token-and-timestep", eval_protocol_rows[2]["estimand"])
         self.assertEqual(eval_rows[0]["uniform_random_pseudo_perplexity"], 16.0)
         self.assertAlmostEqual(eval_rows[0]["bits_saved_vs_uniform"], 1.0, places=6)
         self.assertAlmostEqual(eval_rows[0]["denoising_skill"], 1.0 - (1.0 / 2.772588722239781), places=6)
@@ -361,7 +370,12 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertEqual(eval_rows[-1]["masked_token_accuracy_ci_p05"], 0.35)
 
         comparison_rows = build_schedule_comparison_rows(comparison_summary)
+        comparison_protocol_rows = build_comparison_protocol_rows(comparison_summary)
+        comparison_protocol_by_view = {row["metric_view"]: row for row in comparison_protocol_rows}
         self.assertEqual(comparison_rows[0]["metric_view"], "sampled_pseudo_perplexity")
+        self.assertEqual(comparison_rows[0]["comparison_scope"], "sampled schedule-mix aggregate")
+        self.assertTrue(comparison_protocol_by_view["timestep_auc_pseudo_perplexity"]["is_recommended_primary_metric"])
+        self.assertEqual(comparison_protocol_by_view["timestep_auc_pseudo_perplexity"]["comparison_scope"], "shared normalized-timestep trajectory diagnostic")
         self.assertEqual(comparison_rows[0]["better_direction"], "lower")
         self.assertEqual(comparison_rows[1]["metric_view"], "sampled_bits_per_masked_token")
         self.assertEqual(comparison_rows[1]["cosine_value"], 3.0)
@@ -384,6 +398,7 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("- primary_metric_ci_p05: 2", report)
         self.assertIn("- primary_metric_ci_p95: 2.4", report)
         self.assertIn("- primary_bits_saved_vs_uniform: 0.8", report)
+        self.assertIn("- primary_estimand: uniform-over-eligible-token-and-timestep denoising CE estimated from sampled draws", report)
         self.assertIn("Linear-vs-cosine comparison", report)
         self.assertIn("- primary_metric: timestep_auc_pseudo_perplexity", report)
         self.assertIn("- primary_winner: cosine_schedule", report)
@@ -438,9 +453,9 @@ class HuggingFaceModelCardTests(unittest.TestCase):
             )
             content = Path(card_path).read_text(encoding="utf-8")
 
-        self.assertIn("| timestep_uniform_sampled | uniform mean over sampled per-example timesteps | 1.1 | 2.1 | 16.0 | 3.1 | 0.8999999999999999 |", content)
-        self.assertIn("| schedule_reweighted_sampled | inverse-expected-mask-ratio weighting over sampled masked tokens | 1.2 | 2.2 | 16.0 | 3.2 | 0.7999999999999998 |", content)
-        self.assertIn("| token_weighted_sampled | token-weighted over sampled masked tokens | 1.0 | 2.0 | 16.0 | 3.0 | 1.0 |", content)
+        self.assertIn("| timestep_uniform_sampled | uniform mean over sampled per-example timesteps | uniform-over-sampled-timesteps per-example denoising CE | sampled per-example corruption draws | equal weight per sampled example/timestep draw | 1.1 | 2.1 | 16.0 | 3.1 | 0.8999999999999999 |", content)
+        self.assertIn("| schedule_reweighted_sampled | inverse-expected-mask-ratio weighting over sampled masked tokens | uniform-over-eligible-token-and-timestep denoising CE estimated from sampled draws | sampled masked tokens with inverse expected mask-ratio correction | importance-weighted by inverse expected mask ratio | 1.2 | 2.2 | 16.0 | 3.2 | 0.7999999999999998 |", content)
+        self.assertIn("| token_weighted_sampled | token-weighted over sampled masked tokens | observed masked-token denoising CE under the sampled schedule-induced corruption mix | sampled masked tokens pooled across cached batches | token-weighted | 1.0 | 2.0 | 16.0 | 3.0 | 1.0 |", content)
         self.assertIn("- uniform_random_pseudo_perplexity: 16.0", content)
         self.assertIn("- schedule_reweighted_nonzero_examples: 12", content)
         self.assertIn("- schedule_reweighted_effective_sample_size: 10.5", content)
@@ -457,11 +472,15 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("Sampled evaluation covers 12 per-example corruption draws and 48 masked tokens.", content)
         self.assertIn("- optional `eval_plan.pt` shared cached evaluation plan artifact", content)
         self.assertIn("- optional `hf_export_manifest.json` bundle manifest covering all exported metadata files", content)
-        self.assertIn("| schedule_reweighted_pseudo_perplexity | lower | 2.2 | 2.32 | 0.12 | cosine_schedule | 0.78 | False | True | -0.08 | 0.32 | 0.22 |", content)
-        self.assertIn("| timestep_uniform_accuracy | higher | 0.41 | 0.389 | -0.021 | cosine_schedule | 0.89 | False | True | -0.041 | 0.001 | 0.11 |", content)
-        self.assertIn("| timestep_auc_bits_saved_vs_uniform | higher | 0.5 | 0.482 | -0.018 | cosine_schedule | 0.75 | False | True | -0.055 | 0.025 | 0.75 |", content)
-        self.assertIn("| sampled_denoising_skill | higher | 0.6393262397777592 | 0.6357195021755369 | -0.0036067376022224087 | cosine_schedule | 0.8 | False | True | -0.018 | 0.007 | 0.8 |", content)
-        self.assertIn("| schedule_reweighted_accuracy | higher | 0.42 | 0.398 | -0.022 | cosine_schedule | 0.88 | False | True | -0.042 | 0.002 | 0.12 |", content)
+        self.assertIn("| schedule_reweighted_pseudo_perplexity | lower | sampled schedule-corrected objective estimate | 2.2 | 2.32 | 0.12 | cosine_schedule | 0.78 | False | True | -0.08 | 0.32 | 0.22 |", content)
+        self.assertIn("| timestep_uniform_accuracy | higher | paired shared-plan comparison metric | 0.41 | 0.389 | -0.021 | cosine_schedule | 0.89 | False | True | -0.041 | 0.001 | 0.11 |", content)
+        self.assertIn("| timestep_auc_bits_saved_vs_uniform | higher | paired shared-plan comparison metric | 0.5 | 0.482 | -0.018 | cosine_schedule | 0.75 | False | True | -0.055 | 0.025 | 0.75 |", content)
+        self.assertIn("| sampled_denoising_skill | higher | paired shared-plan comparison metric | 0.6393262397777592 | 0.6357195021755369 | -0.0036067376022224087 | cosine_schedule | 0.8 | False | True | -0.018 | 0.007 | 0.8 |", content)
+        self.assertIn("| schedule_reweighted_accuracy | higher | paired shared-plan comparison metric | 0.42 | 0.398 | -0.022 | cosine_schedule | 0.88 | False | True | -0.042 | 0.002 | 0.12 |", content)
+        self.assertIn("### Metric estimands and comparison semantics", content)
+        self.assertIn("| schedule_reweighted_sampled | uniform-over-eligible-token-and-timestep denoising CE estimated from sampled draws | sampled masked tokens with inverse expected mask-ratio correction | importance-weighted by inverse expected mask ratio | closest sampled estimator to a schedule-corrected diffusion perplexity objective when ESS is healthy | True |", content)
+        self.assertIn("### Comparison semantics", content)
+        self.assertIn("| timestep_auc_pseudo_perplexity | shared normalized-timestep trajectory diagnostic | True | False | False | False |", content)
         self.assertIn("## Schedule decision summary", content)
         self.assertIn("- headline: cosine_schedule_leads", content)
         self.assertIn("  - metric: timestep_auc_pseudo_perplexity", content)

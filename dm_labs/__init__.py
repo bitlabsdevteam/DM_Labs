@@ -1,6 +1,8 @@
 """DM_Labs utilities for diffusion language model experiments."""
 
 from .hf_utils import (
+    build_comparison_protocol_rows,
+    build_eval_protocol_rows,
     ensure_hf_model_card,
     render_eval_summary_report,
     render_hf_preflight_report,
@@ -11,6 +13,8 @@ from .hf_utils import (
 )
 
 __all__ = [
+    "build_comparison_protocol_rows",
+    "build_eval_protocol_rows",
     "ensure_hf_model_card",
     "render_eval_summary_report",
     "render_hf_preflight_report",

@@ -53,6 +53,10 @@ EVAL_VIEW_SPECS = [
         "ci_metric_key": "pseudo_perplexity",
         "ci_accuracy_key": "masked_token_accuracy",
         "aggregation": "token-weighted over sampled masked tokens",
+        "estimand": "observed masked-token denoising CE under the sampled schedule-induced corruption mix",
+        "sample_axis": "sampled masked tokens pooled across cached batches",
+        "weighting": "token-weighted",
+        "comparison_semantics": "useful descriptive sampled aggregate; not schedule-corrected",
     },
     {
         "view": "timestep_uniform_sampled",
@@ -65,6 +69,10 @@ EVAL_VIEW_SPECS = [
         "ci_metric_key": "timestep_uniform_pseudo_perplexity",
         "ci_accuracy_key": "timestep_uniform_masked_token_accuracy",
         "aggregation": "uniform mean over sampled per-example timesteps",
+        "estimand": "uniform-over-sampled-timesteps per-example denoising CE",
+        "sample_axis": "sampled per-example corruption draws",
+        "weighting": "equal weight per sampled example/timestep draw",
+        "comparison_semantics": "schedule-agnostic sampled view with equal top-level timestep weight",
     },
     {
         "view": "schedule_reweighted_sampled",
@@ -77,6 +85,10 @@ EVAL_VIEW_SPECS = [
         "ci_metric_key": "schedule_reweighted_pseudo_perplexity",
         "ci_accuracy_key": "schedule_reweighted_masked_token_accuracy",
         "aggregation": "inverse-expected-mask-ratio weighting over sampled masked tokens",
+        "estimand": "uniform-over-eligible-token-and-timestep denoising CE estimated from sampled draws",
+        "sample_axis": "sampled masked tokens with inverse expected mask-ratio correction",
+        "weighting": "importance-weighted by inverse expected mask ratio",
+        "comparison_semantics": "closest sampled estimator to a schedule-corrected diffusion perplexity objective when ESS is healthy",
     },
     {
         "view": "schedule_reweighted_ht",
@@ -89,6 +101,10 @@ EVAL_VIEW_SPECS = [
         "ci_metric_key": "schedule_reweighted_ht_pseudo_perplexity",
         "ci_accuracy_key": "schedule_reweighted_ht_masked_token_accuracy",
         "aggregation": "Horvitz-Thompson inverse-mask-ratio estimate normalized by exact eligible-token count",
+        "estimand": "population-normalized uniform-over-eligible-token-and-timestep denoising CE",
+        "sample_axis": "sampled masked tokens plus exact eligible-token denominator",
+        "weighting": "Horvitz-Thompson inverse-probability weighting",
+        "comparison_semantics": "schedule-corrected population-style estimator with explicit eligible-token normalization",
     },
     {
         "view": "fixed_grid_batch_uniform",
@@ -101,6 +117,10 @@ EVAL_VIEW_SPECS = [
         "ci_metric_key": "grid_uniform_pseudo_perplexity",
         "ci_accuracy_key": "grid_uniform_masked_token_accuracy",
         "aggregation": "uniform mean over cached batch-timestep records on the fixed grid",
+        "estimand": "fixed diagnostic-grid denoising CE averaged over cached batch-timestep records",
+        "sample_axis": "cached batch-timestep grid records",
+        "weighting": "equal weight per cached batch-timestep record",
+        "comparison_semantics": "explicit shared-grid diagnostic; depends on chosen timestep grid",
     },
     {
         "view": "fixed_grid_timestep_macro",
@@ -113,6 +133,10 @@ EVAL_VIEW_SPECS = [
         "ci_metric_key": "timestep_macro_pseudo_perplexity",
         "ci_accuracy_key": "timestep_macro_masked_token_accuracy",
         "aggregation": "uniform mean over token-weighted per-timestep metrics on the fixed grid",
+        "estimand": "fixed-grid denoising CE with equal top-level weight per diagnostic timestep",
+        "sample_axis": "token-weighted per-timestep summaries on the cached grid",
+        "weighting": "equal weight per timestep after within-timestep token aggregation",
+        "comparison_semantics": "good for stage-balanced schedule comparison on a shared grid",
     },
     {
         "view": "fixed_grid_timestep_auc",
@@ -125,6 +149,10 @@ EVAL_VIEW_SPECS = [
         "ci_metric_key": "timestep_auc_pseudo_perplexity",
         "ci_accuracy_key": "timestep_auc_masked_token_accuracy",
         "aggregation": "normalized trapezoid integral over token-weighted per-timestep metrics on the fixed grid",
+        "estimand": "trajectory-integrated denoising CE over normalized timestep fraction on the fixed grid",
+        "sample_axis": "token-weighted per-timestep summaries on the cached normalized-time grid",
+        "weighting": "trapezoidal integration over normalized timestep fraction",
+        "comparison_semantics": "most conservative shared comparison view when schedules only align by normalized timestep fraction",
     },
 ]
 
@@ -138,6 +166,7 @@ COMPARISON_VIEW_SPECS = [
         "better_direction": "lower",
         "cosine_value_key": ("model", "pseudo_perplexity"),
         "linear_value_key": ("model", "pseudo_perplexity"),
+        "comparison_scope": "sampled schedule-mix aggregate",
     },
     {
         "metric_view": "sampled_bits_per_masked_token",
@@ -174,6 +203,7 @@ COMPARISON_VIEW_SPECS = [
         "better_direction": "lower",
         "cosine_value_key": ("model", "timestep_uniform_pseudo_perplexity"),
         "linear_value_key": ("model", "timestep_uniform_pseudo_perplexity"),
+        "comparison_scope": "sampled equal-timestep view",
     },
     {
         "metric_view": "timestep_uniform_bits_per_masked_token",
@@ -210,6 +240,7 @@ COMPARISON_VIEW_SPECS = [
         "better_direction": "lower",
         "cosine_value_key": ("model", "schedule_reweighted_pseudo_perplexity"),
         "linear_value_key": ("model", "schedule_reweighted_pseudo_perplexity"),
+        "comparison_scope": "sampled schedule-corrected objective estimate",
     },
     {
         "metric_view": "schedule_reweighted_bits_per_masked_token",
@@ -246,6 +277,7 @@ COMPARISON_VIEW_SPECS = [
         "better_direction": "lower",
         "cosine_value_key": ("model", "schedule_reweighted_ht_pseudo_perplexity"),
         "linear_value_key": ("model", "schedule_reweighted_ht_pseudo_perplexity"),
+        "comparison_scope": "sampled Horvitz-Thompson schedule-corrected objective estimate",
     },
     {
         "metric_view": "schedule_reweighted_ht_bits_per_masked_token",
@@ -282,6 +314,7 @@ COMPARISON_VIEW_SPECS = [
         "better_direction": "lower",
         "cosine_value_key": ("model", "grid_uniform_pseudo_perplexity"),
         "linear_value_key": ("model", "grid_uniform_pseudo_perplexity"),
+        "comparison_scope": "shared fixed-grid batch-timestep diagnostic",
     },
     {
         "metric_view": "grid_uniform_bits_per_masked_token",
@@ -318,6 +351,7 @@ COMPARISON_VIEW_SPECS = [
         "better_direction": "lower",
         "cosine_value_key": ("model", "timestep_macro_pseudo_perplexity"),
         "linear_value_key": ("model", "timestep_macro_pseudo_perplexity"),
+        "comparison_scope": "shared fixed-grid equal-timestep diagnostic",
     },
     {
         "metric_view": "timestep_macro_bits_per_masked_token",
@@ -354,6 +388,7 @@ COMPARISON_VIEW_SPECS = [
         "better_direction": "lower",
         "cosine_value_key": ("model", "timestep_auc_pseudo_perplexity"),
         "linear_value_key": ("model", "timestep_auc_pseudo_perplexity"),
+        "comparison_scope": "shared normalized-timestep trajectory diagnostic",
     },
     {
         "metric_view": "timestep_auc_bits_per_masked_token",
@@ -501,6 +536,10 @@ def build_eval_view_rows(eval_summary: Optional[dict] = None) -> list:
             {
                 "view": spec["view"],
                 "aggregation": spec["aggregation"],
+                "estimand": spec.get("estimand"),
+                "sample_axis": spec.get("sample_axis"),
+                "weighting": spec.get("weighting"),
+                "comparison_semantics": spec.get("comparison_semantics"),
                 "avg_cross_entropy": avg_cross_entropy,
                 "pseudo_perplexity": eval_summary.get(spec["pseudo_perplexity_key"]),
                 "bits_per_masked_token": bits_per_masked_token,
@@ -511,6 +550,29 @@ def build_eval_view_rows(eval_summary: Optional[dict] = None) -> list:
                 "pseudo_perplexity_ci_p95": metric_ci.get("p95"),
                 "masked_token_accuracy_ci_p05": accuracy_ci.get("p05"),
                 "masked_token_accuracy_ci_p95": accuracy_ci.get("p95"),
+            }
+        )
+    return rows
+
+
+def build_eval_protocol_rows(eval_summary: Optional[dict] = None) -> list:
+    if not eval_summary:
+        return []
+
+    protocol = eval_summary.get("eval_protocol") or {}
+    quality_summary = eval_summary.get("quality_summary") or {}
+    recommended_view = ((quality_summary.get("recommended_primary_view") or {}).get("view"))
+    rows = []
+    for spec in EVAL_VIEW_SPECS:
+        rows.append(
+            {
+                "view": spec["view"],
+                "estimand": spec.get("estimand"),
+                "sample_axis": spec.get("sample_axis"),
+                "weighting": spec.get("weighting"),
+                "comparison_semantics": spec.get("comparison_semantics"),
+                "is_recommended_primary_view": bool(spec["view"] == recommended_view),
+                "normalized_timestep_remapping": bool(protocol.get("normalized_timestep_remapping", False)),
             }
         )
     return rows
@@ -552,6 +614,7 @@ def build_schedule_comparison_rows(comparison_summary: Optional[dict] = None) ->
             {
                 "metric_view": spec["metric_view"],
                 "better_direction": spec["better_direction"],
+                "comparison_scope": spec.get("comparison_scope", "paired shared-plan comparison metric"),
                 "cosine_value": cosine_value,
                 "linear_value": linear_value,
                 "delta_linear_minus_cosine": delta.get(spec["delta_key"]),
@@ -562,6 +625,29 @@ def build_schedule_comparison_rows(comparison_summary: Optional[dict] = None) ->
                 "winner_probability": confidence.get("winner_probability"),
                 "ci_excludes_zero": confidence.get("ci_excludes_zero"),
                 "practically_tied": confidence.get("practically_tied"),
+            }
+        )
+    return rows
+
+
+def build_comparison_protocol_rows(comparison_summary: Optional[dict] = None) -> list:
+    if not comparison_summary or len(comparison_summary.get("models", [])) < 2:
+        return []
+
+    decision_summary = comparison_summary.get("decision_summary") or {}
+    recommended_metric = ((decision_summary.get("recommended_primary_metric") or {}).get("metric"))
+    protocol = comparison_summary.get("comparison_protocol") or {}
+    rows = []
+    for spec in COMPARISON_VIEW_SPECS:
+        rows.append(
+            {
+                "metric_view": spec["metric_view"],
+                "better_direction": spec["better_direction"],
+                "comparison_scope": spec.get("comparison_scope", "paired shared-plan comparison metric"),
+                "is_recommended_primary_metric": bool(spec["winner_key"] == recommended_metric),
+                "normalized_timestep_remapping": bool(protocol.get("normalized_timestep_remapping", False)),
+                "paired_batches": bool(protocol.get("paired_batches", False)),
+                "paired_uniform_noise": bool(protocol.get("paired_uniform_noise", False)),
             }
         )
     return rows
@@ -663,6 +749,10 @@ def summarize_eval_for_hf(eval_summary: Optional[dict] = None) -> dict:
             "metric_value": eval_summary.get(metric_key) if metric_key else None,
             "metric_confidence_interval": metric_ci,
             "better_direction": recommended.get("better_direction"),
+            "estimand": matching_spec.get("estimand") if matching_spec else None,
+            "sample_axis": matching_spec.get("sample_axis") if matching_spec else None,
+            "weighting": matching_spec.get("weighting") if matching_spec else None,
+            "comparison_semantics": matching_spec.get("comparison_semantics") if matching_spec else None,
             "masked_token_accuracy_value": accuracy_value,
             "bits_saved_vs_uniform": calibration.get("bits_saved_vs_uniform"),
             "bits_saved_vs_uniform_ci_p05": calibration.get("bits_saved_vs_uniform_ci_p05"),
@@ -681,6 +771,10 @@ def summarize_eval_for_hf(eval_summary: Optional[dict] = None) -> dict:
         "primary_metric_value": primary.get("metric_value") if metric_key else None,
         "primary_metric_ci": primary.get("metric_confidence_interval") or {},
         "primary_better_direction": primary.get("better_direction"),
+        "primary_estimand": primary.get("estimand"),
+        "primary_sample_axis": primary.get("sample_axis"),
+        "primary_weighting": primary.get("weighting"),
+        "primary_comparison_semantics": primary.get("comparison_semantics"),
         "primary_bits_saved_vs_uniform": primary.get("bits_saved_vs_uniform"),
         "primary_denoising_skill": primary.get("denoising_skill"),
         "primary_masked_token_accuracy": primary.get("masked_token_accuracy_value"),
@@ -708,6 +802,7 @@ def summarize_comparison_for_hf(comparison_summary: Optional[dict] = None) -> di
             "metric": metric_key,
             "view": recommended.get("view"),
             "winner": recommended.get("winner"),
+            "comparison_scope": next((spec.get("comparison_scope") for spec in COMPARISON_VIEW_SPECS if spec.get("winner_key") == metric_key), None),
             "delta_linear_minus_cosine": (comparison_summary.get("delta") or {}).get(metric_key) if metric_key else None,
             "winner_confidence": (comparison_summary.get("winner_confidence") or {}).get(metric_key) or {},
             "delta_confidence_interval": ((comparison_summary.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {}).get(metric_key) or {},
@@ -719,6 +814,7 @@ def summarize_comparison_for_hf(comparison_summary: Optional[dict] = None) -> di
         "headline": decision_summary.get("headline"),
         "primary_metric": primary.get("metric"),
         "primary_view": primary.get("view"),
+        "primary_comparison_scope": primary.get("comparison_scope"),
         "primary_winner": primary.get("winner"),
         "primary_winner_probability": winner_confidence.get("winner_probability"),
         "primary_ci_excludes_zero": winner_confidence.get("ci_excludes_zero"),
@@ -769,6 +865,10 @@ def render_eval_summary_report(
                 f"- primary_metric: {_format_report_scalar(eval_snapshot.get('primary_metric_key'))} = {_format_report_scalar(eval_snapshot.get('primary_metric_value'))} ({_format_report_scalar(eval_snapshot.get('primary_better_direction'))} is better)",
                 f"- primary_metric_ci_p05: {_format_report_scalar((eval_snapshot.get('primary_metric_ci') or {}).get('p05'))}",
                 f"- primary_metric_ci_p95: {_format_report_scalar((eval_snapshot.get('primary_metric_ci') or {}).get('p95'))}",
+                f"- primary_estimand: {_format_report_scalar(eval_snapshot.get('primary_estimand'))}",
+                f"- primary_sample_axis: {_format_report_scalar(eval_snapshot.get('primary_sample_axis'))}",
+                f"- primary_weighting: {_format_report_scalar(eval_snapshot.get('primary_weighting'))}",
+                f"- primary_comparison_semantics: {_format_report_scalar(eval_snapshot.get('primary_comparison_semantics'))}",
                 f"- schedule_reweighted_reliability: {_format_report_scalar(eval_snapshot.get('schedule_reweighted_reliability'))}",
                 f"- sampled_example_count: {_format_report_scalar(eval_snapshot.get('sampled_example_count'))}",
                 f"- masked_tokens: {_format_report_scalar(eval_snapshot.get('masked_tokens'))}",
@@ -808,6 +908,7 @@ def render_eval_summary_report(
                 f"- headline: {_format_report_scalar(comparison_snapshot.get('headline'))}",
                 f"- primary_metric: {_format_report_scalar(primary_metric)}",
                 f"- primary_view: {_format_report_scalar(comparison_snapshot.get('primary_view'))}",
+                f"- primary_comparison_scope: {_format_report_scalar(comparison_snapshot.get('primary_comparison_scope'))}",
                 f"- primary_winner: {_format_report_scalar(comparison_snapshot.get('primary_winner'))}",
                 f"- winner_probability: {_format_report_scalar(comparison_snapshot.get('primary_winner_probability'))}",
                 f"- ci_excludes_zero: {_format_report_scalar(comparison_snapshot.get('primary_ci_excludes_zero'))}",
@@ -984,13 +1085,14 @@ def ensure_hf_model_card(
         eval_rows = build_eval_view_rows(eval_summary)
         metrics_lines = [
             "\n## Evaluation summary\n",
-            "| view | aggregation | avg_cross_entropy | pseudo_perplexity | uniform_random_pseudo_perplexity | bits_per_masked_token | bits_saved_vs_uniform | bits_saved_ci_p05 | bits_saved_ci_p95 | denoising_skill | denoising_skill_ci_p05 | denoising_skill_ci_p95 | masked_token_accuracy | pseudo_perplexity_ci_p05 | pseudo_perplexity_ci_p95 | accuracy_ci_p05 | accuracy_ci_p95 |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+            "| view | aggregation | estimand | sample_axis | weighting | avg_cross_entropy | pseudo_perplexity | uniform_random_pseudo_perplexity | bits_per_masked_token | bits_saved_vs_uniform | bits_saved_ci_p05 | bits_saved_ci_p95 | denoising_skill | denoising_skill_ci_p05 | denoising_skill_ci_p95 | masked_token_accuracy | pseudo_perplexity_ci_p05 | pseudo_perplexity_ci_p95 | accuracy_ci_p05 | accuracy_ci_p95 |",
+            "| --- | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         ]
         for row in eval_rows:
             metrics_lines.append(
-                f"| {row['view']} | {row['aggregation']} | {row['avg_cross_entropy']} | {row['pseudo_perplexity']} | {row['uniform_random_pseudo_perplexity']} | {row['bits_per_masked_token']} | {row['bits_saved_vs_uniform']} | {row.get('bits_saved_vs_uniform_ci_p05')} | {row.get('bits_saved_vs_uniform_ci_p95')} | {row['denoising_skill']} | {row.get('denoising_skill_ci_p05')} | {row.get('denoising_skill_ci_p95')} | {row['masked_token_accuracy']} | {row['pseudo_perplexity_ci_p05']} | {row['pseudo_perplexity_ci_p95']} | {row['masked_token_accuracy_ci_p05']} | {row['masked_token_accuracy_ci_p95']} |"
+                f"| {row['view']} | {row['aggregation']} | {row.get('estimand')} | {row.get('sample_axis')} | {row.get('weighting')} | {row['avg_cross_entropy']} | {row['pseudo_perplexity']} | {row['uniform_random_pseudo_perplexity']} | {row['bits_per_masked_token']} | {row['bits_saved_vs_uniform']} | {row.get('bits_saved_vs_uniform_ci_p05')} | {row.get('bits_saved_vs_uniform_ci_p95')} | {row['denoising_skill']} | {row.get('denoising_skill_ci_p05')} | {row.get('denoising_skill_ci_p95')} | {row['masked_token_accuracy']} | {row['pseudo_perplexity_ci_p05']} | {row['pseudo_perplexity_ci_p95']} | {row['masked_token_accuracy_ci_p05']} | {row['masked_token_accuracy_ci_p95']} |"
             )
+        protocol_rows = build_eval_protocol_rows(eval_summary)
         metrics_lines.extend(
             [
                 "",
@@ -1013,6 +1115,18 @@ def ensure_hf_model_card(
                 f"- timestep_auc_fraction_span: {eval_summary.get('timestep_auc_fraction_span')}",
             ]
         )
+        if protocol_rows:
+            metrics_lines.extend([
+                "",
+                "### Metric estimands and comparison semantics",
+                "",
+                "| view | estimand | sample_axis | weighting | comparison_semantics | recommended_primary |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ])
+            for row in protocol_rows:
+                metrics_lines.append(
+                    f"| {row['view']} | {row['estimand']} | {row['sample_axis']} | {row['weighting']} | {row['comparison_semantics']} | {row['is_recommended_primary_view']} |"
+                )
         metrics_block = "\n".join(metrics_lines) + "\n"
         protocol = eval_summary.get("eval_protocol") or {}
         if protocol:
@@ -1106,12 +1220,12 @@ def ensure_hf_model_card(
     if comparison_rows:
         comparison_lines = [
             "\n## Schedule comparison\n",
-            "| metric_view | better_direction | cosine_value | linear_value | delta_linear_minus_cosine | winner | winner_probability | ci_excludes_zero | practically_tied | bootstrap_p05 | bootstrap_p95 | probability_linear_better |",
-            "| --- | --- | ---: | ---: | ---: | --- | ---: | --- | --- | ---: | ---: | ---: |",
+            "| metric_view | better_direction | comparison_scope | cosine_value | linear_value | delta_linear_minus_cosine | winner | winner_probability | ci_excludes_zero | practically_tied | bootstrap_p05 | bootstrap_p95 | probability_linear_better |",
+            "| --- | --- | --- | ---: | ---: | ---: | --- | ---: | --- | --- | ---: | ---: | ---: |",
         ]
         for row in comparison_rows:
             comparison_lines.append(
-                f"| {row['metric_view']} | {row['better_direction']} | {row['cosine_value']} | {row['linear_value']} | {row['delta_linear_minus_cosine']} | {row['winner']} | {row.get('winner_probability')} | {row.get('ci_excludes_zero')} | {row.get('practically_tied')} | {row['bootstrap_p05']} | {row['bootstrap_p95']} | {row['probability_linear_better']} |"
+                f"| {row['metric_view']} | {row['better_direction']} | {row.get('comparison_scope')} | {row['cosine_value']} | {row['linear_value']} | {row['delta_linear_minus_cosine']} | {row['winner']} | {row.get('winner_probability')} | {row.get('ci_excludes_zero')} | {row.get('practically_tied')} | {row['bootstrap_p05']} | {row['bootstrap_p95']} | {row['probability_linear_better']} |"
             )
         delta = comparison_summary.get("delta") or {}
         comparison_lines.extend(
@@ -1126,6 +1240,19 @@ def ensure_hf_model_card(
                 f"- timestep_auc_bits_per_masked_token_delta_linear_minus_cosine: {delta.get('timestep_auc_bits_per_masked_token')}",
             ]
         )
+        comparison_protocol_rows = build_comparison_protocol_rows(comparison_summary)
+        if comparison_protocol_rows:
+            comparison_lines.extend([
+                "",
+                "### Comparison semantics",
+                "",
+                "| metric_view | comparison_scope | recommended_primary | paired_batches | paired_uniform_noise | normalized_timestep_remapping |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ])
+            for row in comparison_protocol_rows:
+                comparison_lines.append(
+                    f"| {row['metric_view']} | {row['comparison_scope']} | {row['is_recommended_primary_metric']} | {row['paired_batches']} | {row['paired_uniform_noise']} | {row['normalized_timestep_remapping']} |"
+                )
         comparison_block = "\n".join(comparison_lines) + "\n"
         decision_summary = comparison_summary.get("decision_summary") or {}
         if decision_summary:
