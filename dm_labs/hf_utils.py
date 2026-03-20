@@ -945,6 +945,8 @@ def render_hf_preflight_report(validation: Optional[dict] = None) -> str:
         f"- repo_id: {_format_report_scalar(validation.get('repo_id'))}",
         f"- local_artifact_dir: {_format_report_scalar(validation.get('local_artifact_dir'))}",
         f"- ready_for_upload: {_format_report_scalar(validation.get('ready_for_upload'))}",
+        f"- eval_report_exists: {_format_report_scalar(checks.get('eval_report_exists'))}",
+        f"- preflight_report_exists: {_format_report_scalar(checks.get('preflight_report_exists'))}",
         f"- model_exists: {_format_report_scalar(checks.get('model_exists'))}",
         f"- config_exists: {_format_report_scalar(checks.get('config_exists'))}",
         f"- tokenizer_loadable_bundle_present: {_format_report_scalar(checks.get('tokenizer_loadable_bundle_present'))}",
@@ -963,6 +965,33 @@ def render_hf_preflight_report(validation: Optional[dict] = None) -> str:
 
 
 
+def write_eval_summary_report(
+    local_artifact_dir: str,
+    *,
+    eval_summary: Optional[dict] = None,
+    comparison_summary: Optional[dict] = None,
+) -> Optional[str]:
+    report = render_eval_summary_report(eval_summary=eval_summary, comparison_summary=comparison_summary)
+    if not report.strip():
+        return None
+    local_artifact_dir = Path(local_artifact_dir)
+    out_path = local_artifact_dir / "eval_summary_report.txt"
+    out_path.write_text(report + "\n", encoding="utf-8")
+    return str(out_path)
+
+
+
+def write_hf_preflight_report(local_artifact_dir: str, validation: Optional[dict] = None) -> Optional[str]:
+    report = render_hf_preflight_report(validation)
+    if not report.strip():
+        return None
+    local_artifact_dir = Path(local_artifact_dir)
+    out_path = local_artifact_dir / "hf_preflight_report.txt"
+    out_path.write_text(report + "\n", encoding="utf-8")
+    return str(out_path)
+
+
+
 def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = None) -> dict:
     local_artifact_dir = Path(local_artifact_dir)
     manifest_path = local_artifact_dir / "hf_export_manifest.json"
@@ -970,6 +999,8 @@ def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = 
     eval_summary_path = local_artifact_dir / "eval_summary.json"
     comparison_path = local_artifact_dir / "schedule_comparison.json"
     eval_plan_path = local_artifact_dir / "eval_plan.pt"
+    eval_report_path = local_artifact_dir / "eval_summary_report.txt"
+    preflight_report_path = local_artifact_dir / "hf_preflight_report.txt"
 
     manifest = {}
     if manifest_path.exists():
@@ -983,6 +1014,8 @@ def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = 
         "eval_summary_exists": eval_summary_path.exists(),
         "schedule_comparison_exists": comparison_path.exists(),
         "eval_plan_exists": eval_plan_path.exists(),
+        "eval_report_exists": eval_report_path.exists(),
+        "preflight_report_exists": preflight_report_path.exists(),
         "manifest_repo_id_matches": (repo_id is None) or (manifest.get("repo_id") == repo_id),
         **artifact_inspection.get("checks", {}),
     }
@@ -1017,6 +1050,8 @@ def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = 
         "eval_summary_path": str(eval_summary_path) if eval_summary_path.exists() else None,
         "comparison_summary_path": str(comparison_path) if comparison_path.exists() else None,
         "eval_plan_path": str(eval_plan_path) if eval_plan_path.exists() else None,
+        "eval_report_path": str(eval_report_path) if eval_report_path.exists() else None,
+        "preflight_report_path": str(preflight_report_path) if preflight_report_path.exists() else None,
         "artifact_inspection": artifact_inspection,
     }
 
@@ -1036,6 +1071,11 @@ def write_hf_export_bundle(
     eval_summary_path = write_eval_summary(local_artifact_dir, eval_summary=eval_summary)
     comparison_path = write_schedule_comparison(local_artifact_dir, comparison_summary=comparison_summary)
     eval_plan_path = write_eval_plan(local_artifact_dir, eval_plan=eval_plan)
+    eval_report_path = write_eval_summary_report(
+        local_artifact_dir,
+        eval_summary=eval_summary,
+        comparison_summary=comparison_summary,
+    )
     readme_path = ensure_hf_model_card(
         local_artifact_dir,
         repo_id,
@@ -1050,16 +1090,24 @@ def write_hf_export_bundle(
         "eval_summary_path": eval_summary_path,
         "comparison_summary_path": comparison_path,
         "eval_plan_path": eval_plan_path,
+        "eval_report_path": eval_report_path,
+        "preflight_report_path": None,
         "has_eval_summary": eval_summary is not None,
         "has_comparison_summary": comparison_summary is not None,
         "has_eval_plan": eval_plan is not None,
+        "has_eval_report": eval_report_path is not None,
         "eval_snapshot": summarize_eval_for_hf(eval_summary),
         "comparison_snapshot": summarize_comparison_for_hf(comparison_summary),
     }
     manifest_path = local_artifact_dir / "hf_export_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     manifest["manifest_path"] = str(manifest_path)
-    manifest["validation"] = validate_hf_export_bundle(local_artifact_dir, repo_id=repo_id)
+    validation = validate_hf_export_bundle(local_artifact_dir, repo_id=repo_id)
+    preflight_report_path = write_hf_preflight_report(local_artifact_dir, validation=validation)
+    manifest["preflight_report_path"] = preflight_report_path
+    manifest["has_preflight_report"] = preflight_report_path is not None
+    manifest["validation"] = validation
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest
 
 
@@ -1314,6 +1362,8 @@ This model repo contains artifacts exported from the DM_Labs notebook for a disc
 - optional `eval_summary.json`
 - optional `schedule_comparison.json`
 - optional `eval_plan.pt` shared cached evaluation plan artifact
+- optional `eval_summary_report.txt` plain-text notebook/HF evaluation summary
+- optional `hf_preflight_report.txt` plain-text Hugging Face upload preflight summary
 - optional `hf_export_manifest.json` bundle manifest covering all exported metadata files
 - optional schedule-comparison JSON artifacts
 - optional bundle validation metadata inside `hf_export_manifest.json`
