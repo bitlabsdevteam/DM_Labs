@@ -810,6 +810,7 @@ def summarize_comparison_for_hf(comparison_summary: Optional[dict] = None) -> di
         }
     winner_confidence = primary.get("winner_confidence") or {}
     delta_ci = primary.get("delta_confidence_interval") or {}
+    quality_summary = comparison_summary.get("quality_summary") or {}
     return {
         "headline": decision_summary.get("headline"),
         "primary_metric": primary.get("metric"),
@@ -827,6 +828,12 @@ def summarize_comparison_for_hf(comparison_summary: Optional[dict] = None) -> di
         "normalized_timestep_remapping": bool((comparison_summary.get("comparison_protocol") or {}).get("normalized_timestep_remapping", False)),
         "tracked_metric_count": decision_summary.get("tracked_metric_count"),
         "decisive_metric_count": decision_summary.get("decisive_metric_count"),
+        "comparison_quality_primary_metric": quality_summary.get("primary_metric"),
+        "comparison_quality_shared_timestep_count": quality_summary.get("shared_timestep_count"),
+        "comparison_quality_cosine_schedule_reweighted_reliability": quality_summary.get("cosine_schedule_reweighted_reliability"),
+        "comparison_quality_linear_schedule_reweighted_reliability": quality_summary.get("linear_schedule_reweighted_reliability"),
+        "comparison_quality_notes": quality_summary.get("notes") or [],
+        "comparison_quality_warnings": quality_summary.get("warnings") or [],
     }
 
 
@@ -917,6 +924,9 @@ def render_eval_summary_report(
                 f"- delta_ci_p05: {_format_report_scalar((comparison_snapshot.get('primary_delta_ci') or {}).get('p05'))}",
                 f"- delta_ci_p95: {_format_report_scalar((comparison_snapshot.get('primary_delta_ci') or {}).get('p95'))}",
                 f"- normalized_timestep_remapping: {_format_report_scalar(comparison_snapshot.get('normalized_timestep_remapping'))}",
+                f"- shared_timestep_count: {_format_report_scalar(comparison_snapshot.get('comparison_quality_shared_timestep_count'))}",
+                f"- cosine_schedule_reweighted_reliability: {_format_report_scalar(comparison_snapshot.get('comparison_quality_cosine_schedule_reweighted_reliability'))}",
+                f"- linear_schedule_reweighted_reliability: {_format_report_scalar(comparison_snapshot.get('comparison_quality_linear_schedule_reweighted_reliability'))}",
             ]
         )
         if primary_row:
@@ -930,6 +940,14 @@ def render_eval_summary_report(
                     f"- probability_linear_better: {_format_report_scalar(primary_row.get('probability_linear_better'))}",
                 ]
             )
+        comparison_notes = comparison_snapshot.get("comparison_quality_notes") or []
+        comparison_warnings = comparison_snapshot.get("comparison_quality_warnings") or []
+        if comparison_notes:
+            lines.append("- comparison_quality_notes:")
+            lines.extend([f"  - {note}" for note in comparison_notes])
+        if comparison_warnings:
+            lines.append("- comparison_quality_warnings:")
+            lines.extend([f"  - {warning}" for warning in comparison_warnings])
 
     return "\n".join(lines)
 
@@ -1128,6 +1146,7 @@ def ensure_hf_model_card(
     quality_block = ""
     comparison_block = ""
     decision_block = ""
+    comparison_quality_block = ""
     export_snapshot_block = ""
     if eval_summary:
         eval_rows = build_eval_view_rows(eval_summary)
@@ -1260,6 +1279,8 @@ def ensure_hf_model_card(
                     f"  - primary_delta_ci: {comparison_snapshot.get('primary_delta_ci')}",
                     f"  - primary_practically_tied: {comparison_snapshot.get('primary_practically_tied')}",
                     f"  - normalized_timestep_remapping: {comparison_snapshot.get('normalized_timestep_remapping')}",
+                    f"  - cosine_schedule_reweighted_reliability: {comparison_snapshot.get('comparison_quality_cosine_schedule_reweighted_reliability')}",
+                    f"  - linear_schedule_reweighted_reliability: {comparison_snapshot.get('comparison_quality_linear_schedule_reweighted_reliability')}",
                 ]
             )
         export_snapshot_block = "\n".join(snapshot_lines) + "\n"
@@ -1339,6 +1360,30 @@ def ensure_hf_model_card(
                         f"| {row.get('metric')} | {row.get('winner')} | {row.get('better_direction')} | {row.get('winner_probability')} | {row.get('ci_excludes_zero')} | {row.get('practically_tied')} | {row.get('is_recommended_primary_metric')} |"
                     )
             decision_block = "\n".join(decision_lines) + "\n"
+        comparison_quality = comparison_summary.get("quality_summary") or {}
+        if comparison_quality:
+            quality_lines = [
+                "\n## Comparison quality summary\n",
+                f"- primary_metric: {comparison_quality.get('primary_metric')}",
+                f"- primary_metric_view: {comparison_quality.get('primary_metric_view')}",
+                f"- primary_metric_ci_excludes_zero: {comparison_quality.get('primary_metric_ci_excludes_zero')}",
+                f"- primary_metric_practically_tied: {comparison_quality.get('primary_metric_practically_tied')}",
+                f"- shared_timestep_count: {comparison_quality.get('shared_timestep_count')}",
+                f"- normalized_timestep_remapping: {comparison_quality.get('normalized_timestep_remapping')}",
+                f"- cosine_schedule_reweighted_reliability: {comparison_quality.get('cosine_schedule_reweighted_reliability')}",
+                f"- linear_schedule_reweighted_reliability: {comparison_quality.get('linear_schedule_reweighted_reliability')}",
+                f"- cosine_sampled_example_count: {comparison_quality.get('cosine_sampled_example_count')}",
+                f"- linear_sampled_example_count: {comparison_quality.get('linear_sampled_example_count')}",
+            ]
+            notes = comparison_quality.get("notes") or []
+            warnings = comparison_quality.get("warnings") or []
+            if notes:
+                quality_lines.append("- notes:")
+                quality_lines.extend([f"  - {note}" for note in notes])
+            if warnings:
+                quality_lines.append("- warnings:")
+                quality_lines.extend([f"  - {warning}" for warning in warnings])
+            comparison_quality_block = "\n".join(quality_lines) + "\n"
 
     readme_path.write_text(
         f"""---
@@ -1367,7 +1412,7 @@ This model repo contains artifacts exported from the DM_Labs notebook for a disc
 - optional `hf_export_manifest.json` bundle manifest covering all exported metadata files
 - optional schedule-comparison JSON artifacts
 - optional bundle validation metadata inside `hf_export_manifest.json`
-{metrics_block}{protocol_block}{quality_block}{export_snapshot_block}{comparison_block}{decision_block}## Evaluation note
+{metrics_block}{protocol_block}{quality_block}{export_snapshot_block}{comparison_block}{comparison_quality_block}{decision_block}## Evaluation note
 
 The reported pseudo-perplexity is based on masked-token denoising NLL under a diffusion corruption process. It is **not** autoregressive next-token perplexity.
 

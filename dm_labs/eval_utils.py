@@ -2126,6 +2126,66 @@ def _recommend_comparison_primary_metric(comparison: Dict[str, object]) -> Dict[
     return default_primary
 
 
+def _build_comparison_quality_summary(comparison: Dict[str, object]) -> Dict[str, object]:
+    protocol = comparison.get("comparison_protocol") or {}
+    models = comparison.get("models") or []
+    cosine_model = models[0] if len(models) > 0 else {}
+    linear_model = models[1] if len(models) > 1 else {}
+    cosine_quality = cosine_model.get("quality_summary") or {}
+    linear_quality = linear_model.get("quality_summary") or {}
+    primary_metric = _recommend_comparison_primary_metric(comparison)
+    primary_metric_key = str(primary_metric.get("metric") or "timestep_auc_pseudo_perplexity")
+    primary_confidence = (comparison.get("winner_confidence") or {}).get(primary_metric_key) or {}
+
+    cosine_reliability = cosine_quality.get("schedule_reweighted_reliability")
+    linear_reliability = linear_quality.get("schedule_reweighted_reliability")
+    shared_timestep_count = len(protocol.get("shared_timestep_grid") or [])
+    normalized_timestep_remapping = bool(protocol.get("normalized_timestep_remapping", False))
+    notes: List[str] = []
+    warnings: List[str] = []
+
+    if normalized_timestep_remapping:
+        notes.append("Timesteps are aligned by normalized timestep fraction, so timestep-AUC is the conservative shared headline view.")
+    else:
+        notes.append("Both schedules are compared on the same integer timestep grid, cached batches, and paired uniform-noise draws.")
+
+    if shared_timestep_count >= 3:
+        notes.append(f"The shared diagnostic grid spans {shared_timestep_count} timesteps, which is enough for macro/AUC trajectory summaries.")
+    elif shared_timestep_count > 0:
+        warnings.append(f"The shared diagnostic grid only spans {shared_timestep_count} timesteps, so macro/AUC summaries are available but thin.")
+    else:
+        warnings.append("No shared diagnostic timestep grid was recorded for the comparison.")
+
+    if cosine_reliability == "fragile" or linear_reliability == "fragile":
+        warnings.append("At least one checkpoint has fragile schedule-reweighted ESS, so sampled schedule-corrected deltas should be cross-checked against grid/AUC views.")
+    elif cosine_reliability == "unknown" or linear_reliability == "unknown":
+        warnings.append("At least one checkpoint did not produce a finite schedule-reweighted ESS diagnostic.")
+    elif cosine_reliability == "usable" or linear_reliability == "usable":
+        warnings.append("At least one checkpoint only has usable-not-strong schedule-reweighted ESS; treat small sampled deltas cautiously.")
+    elif cosine_reliability == "strong" and linear_reliability == "strong":
+        notes.append("Both checkpoints have strong schedule-reweighted ESS support, so sampled schedule-corrected views are statistically healthier than usual.")
+
+    if bool(primary_confidence.get("ci_excludes_zero", False)):
+        notes.append("The recommended primary comparison metric has a bootstrap interval that excludes zero.")
+    else:
+        warnings.append("The recommended primary comparison metric is not yet decisive under the paired bootstrap interval.")
+
+    return {
+        "primary_metric": primary_metric_key,
+        "primary_metric_view": primary_metric.get("view"),
+        "primary_metric_ci_excludes_zero": bool(primary_confidence.get("ci_excludes_zero", False)),
+        "primary_metric_practically_tied": bool(primary_confidence.get("practically_tied", True)),
+        "cosine_schedule_reweighted_reliability": cosine_reliability,
+        "linear_schedule_reweighted_reliability": linear_reliability,
+        "cosine_sampled_example_count": cosine_quality.get("sampled_example_count"),
+        "linear_sampled_example_count": linear_quality.get("sampled_example_count"),
+        "shared_timestep_count": shared_timestep_count,
+        "normalized_timestep_remapping": normalized_timestep_remapping,
+        "notes": notes,
+        "warnings": warnings,
+    }
+
+
 def _build_comparison_decision_summary(comparison: Dict[str, object]) -> Dict[str, object]:
     winner = comparison.get("winner") or {}
     confidence = comparison.get("winner_confidence") or {}
@@ -2487,6 +2547,7 @@ def compare_schedule_checkpoints(
             "timestep_auc_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_bits_saved_vs_uniform"), better_direction="higher"),
             "timestep_auc_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_denoising_skill"), better_direction="higher"),
         }
+        comparison["quality_summary"] = _build_comparison_quality_summary(comparison)
         comparison["decision_summary"] = _build_comparison_decision_summary(comparison)
         comparison["primary_metric_snapshot"] = _build_primary_comparison_metric_snapshot(comparison)
     return comparison

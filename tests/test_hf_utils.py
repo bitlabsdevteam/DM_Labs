@@ -260,6 +260,20 @@ class HuggingFaceModelCardTests(unittest.TestCase):
                     "timestep_auc_masked_token_accuracy": {"p05": -0.045, "p95": 0.005, "probability_linear_better": 0.15},
                 }
             },
+            "quality_summary": {
+                "primary_metric": "timestep_auc_pseudo_perplexity",
+                "primary_metric_view": "fixed_grid_timestep_auc",
+                "primary_metric_ci_excludes_zero": False,
+                "primary_metric_practically_tied": True,
+                "shared_timestep_count": 5,
+                "normalized_timestep_remapping": False,
+                "cosine_schedule_reweighted_reliability": "strong",
+                "linear_schedule_reweighted_reliability": "usable",
+                "cosine_sampled_example_count": 12,
+                "linear_sampled_example_count": 12,
+                "notes": ["Both schedules are compared on the same integer timestep grid, cached batches, and paired uniform-noise draws."],
+                "warnings": ["The recommended primary comparison metric is not yet decisive under the paired bootstrap interval."],
+            },
             "decision_summary": {
                 "headline": "cosine_schedule_leads",
                 "tracked_metric_count": 10,
