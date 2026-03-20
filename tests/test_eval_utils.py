@@ -74,6 +74,8 @@ class EvalPlanRemapTests(unittest.TestCase):
         self.assertIn("primary_metric_snapshot", result)
         self.assertEqual(result["primary_metric_snapshot"]["metric_key"], "schedule_reweighted_pseudo_perplexity")
         self.assertEqual(result["primary_metric_snapshot"]["view"], "schedule_reweighted_sampled")
+        self.assertIn("uniform-over-eligible-token-and-timestep", result["primary_metric_snapshot"]["estimand"])
+        self.assertEqual(result["primary_metric_snapshot"]["weighting"], "importance-weighted by inverse expected mask ratio")
         self.assertAlmostEqual(result["primary_metric_snapshot"]["bits_saved_vs_uniform"], 0.0, places=6)
 
     def test_timestep_auc_matches_constant_metric_surface(self):
@@ -276,6 +278,7 @@ class ScheduleComparisonRemapTests(unittest.TestCase):
         self.assertIn("primary_metric_snapshot", comparison)
         self.assertEqual(comparison["primary_metric_snapshot"]["metric"], "timestep_auc_pseudo_perplexity")
         self.assertEqual(comparison["primary_metric_snapshot"]["view"], "fixed_grid_timestep_auc")
+        self.assertEqual(comparison["primary_metric_snapshot"]["comparison_scope"], "shared normalized-timestep trajectory diagnostic")
         self.assertTrue(comparison["primary_metric_snapshot"]["normalized_timestep_remapping"])
 
 

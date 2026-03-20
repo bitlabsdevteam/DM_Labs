@@ -1745,6 +1745,89 @@ EVAL_CALIBRATION_VIEW_SPECS = {
     },
 }
 
+EVAL_VIEW_METADATA = {
+    "token_weighted_sampled": {
+        "estimand": "observed masked-token denoising CE under the sampled schedule-induced corruption mix",
+        "sample_axis": "sampled masked tokens pooled across cached batches",
+        "weighting": "token-weighted",
+        "comparison_semantics": "useful descriptive sampled aggregate; not schedule-corrected",
+    },
+    "timestep_uniform_sampled": {
+        "estimand": "uniform-over-sampled-timesteps per-example denoising CE",
+        "sample_axis": "sampled per-example corruption draws",
+        "weighting": "equal weight per sampled example/timestep draw",
+        "comparison_semantics": "schedule-agnostic sampled view with equal top-level timestep weight",
+    },
+    "schedule_reweighted_sampled": {
+        "estimand": "uniform-over-eligible-token-and-timestep denoising CE estimated from sampled draws",
+        "sample_axis": "sampled masked tokens with inverse expected mask-ratio correction",
+        "weighting": "importance-weighted by inverse expected mask ratio",
+        "comparison_semantics": "closest sampled estimator to a schedule-corrected diffusion perplexity objective when ESS is healthy",
+    },
+    "schedule_reweighted_ht": {
+        "estimand": "population-normalized uniform-over-eligible-token-and-timestep denoising CE",
+        "sample_axis": "sampled masked tokens plus exact eligible-token denominator",
+        "weighting": "Horvitz-Thompson inverse-probability weighting",
+        "comparison_semantics": "schedule-corrected population-style estimator with explicit eligible-token normalization",
+    },
+    "fixed_grid_batch_uniform": {
+        "estimand": "fixed diagnostic-grid denoising CE averaged over cached batch-timestep records",
+        "sample_axis": "cached batch-timestep grid records",
+        "weighting": "equal weight per cached batch-timestep record",
+        "comparison_semantics": "explicit shared-grid diagnostic; depends on chosen timestep grid",
+    },
+    "fixed_grid_timestep_macro": {
+        "estimand": "fixed-grid denoising CE with equal top-level weight per diagnostic timestep",
+        "sample_axis": "token-weighted per-timestep summaries on the cached grid",
+        "weighting": "equal weight per timestep after within-timestep token aggregation",
+        "comparison_semantics": "good for stage-balanced schedule comparison on a shared grid",
+    },
+    "fixed_grid_timestep_auc": {
+        "estimand": "trajectory-integrated denoising CE over normalized timestep fraction on the fixed grid",
+        "sample_axis": "token-weighted per-timestep summaries on the cached normalized-time grid",
+        "weighting": "trapezoidal integration over normalized timestep fraction",
+        "comparison_semantics": "most conservative shared comparison view when schedules only align by normalized timestep fraction",
+    },
+}
+
+COMPARISON_VIEW_METADATA = {
+    "pseudo_perplexity": {"comparison_scope": "sampled schedule-mix aggregate"},
+    "bits_per_masked_token": {"comparison_scope": "paired shared-plan comparison metric"},
+    "masked_token_accuracy": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_uniform_pseudo_perplexity": {"comparison_scope": "sampled equal-timestep view"},
+    "timestep_uniform_bits_per_masked_token": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_uniform_masked_token_accuracy": {"comparison_scope": "paired shared-plan comparison metric"},
+    "schedule_reweighted_pseudo_perplexity": {"comparison_scope": "sampled schedule-corrected objective estimate"},
+    "schedule_reweighted_bits_per_masked_token": {"comparison_scope": "paired shared-plan comparison metric"},
+    "schedule_reweighted_masked_token_accuracy": {"comparison_scope": "paired shared-plan comparison metric"},
+    "schedule_reweighted_ht_pseudo_perplexity": {"comparison_scope": "sampled Horvitz-Thompson schedule-corrected objective estimate"},
+    "schedule_reweighted_ht_bits_per_masked_token": {"comparison_scope": "paired shared-plan comparison metric"},
+    "schedule_reweighted_ht_masked_token_accuracy": {"comparison_scope": "paired shared-plan comparison metric"},
+    "grid_uniform_pseudo_perplexity": {"comparison_scope": "shared fixed-grid batch-timestep diagnostic"},
+    "grid_uniform_bits_per_masked_token": {"comparison_scope": "paired shared-plan comparison metric"},
+    "grid_uniform_masked_token_accuracy": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_macro_pseudo_perplexity": {"comparison_scope": "shared fixed-grid equal-timestep diagnostic"},
+    "timestep_macro_bits_per_masked_token": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_macro_masked_token_accuracy": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_auc_pseudo_perplexity": {"comparison_scope": "shared normalized-timestep trajectory diagnostic"},
+    "timestep_auc_bits_per_masked_token": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_auc_masked_token_accuracy": {"comparison_scope": "paired shared-plan comparison metric"},
+    "sampled_bits_saved_vs_uniform": {"comparison_scope": "paired shared-plan comparison metric"},
+    "sampled_denoising_skill": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_uniform_bits_saved_vs_uniform": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_uniform_denoising_skill": {"comparison_scope": "paired shared-plan comparison metric"},
+    "schedule_reweighted_bits_saved_vs_uniform": {"comparison_scope": "paired shared-plan comparison metric"},
+    "schedule_reweighted_denoising_skill": {"comparison_scope": "paired shared-plan comparison metric"},
+    "schedule_reweighted_ht_bits_saved_vs_uniform": {"comparison_scope": "paired shared-plan comparison metric"},
+    "schedule_reweighted_ht_denoising_skill": {"comparison_scope": "paired shared-plan comparison metric"},
+    "grid_uniform_bits_saved_vs_uniform": {"comparison_scope": "paired shared-plan comparison metric"},
+    "grid_uniform_denoising_skill": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_macro_bits_saved_vs_uniform": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_macro_denoising_skill": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_auc_bits_saved_vs_uniform": {"comparison_scope": "paired shared-plan comparison metric"},
+    "timestep_auc_denoising_skill": {"comparison_scope": "paired shared-plan comparison metric"},
+}
+
 
 def _build_calibration_view_summaries(summary: Dict[str, object]) -> Dict[str, Dict[str, float]]:
     vocab_size = summary.get("vocab_size")
@@ -1946,6 +2029,7 @@ def _build_primary_eval_metric_snapshot(result: Dict[str, object]) -> Dict[str, 
     }
     calibration_key = view_key_map.get(str(view_name), "sampled")
     calibration = (result.get("calibration") or {}).get(calibration_key) or {}
+    metadata = EVAL_VIEW_METADATA.get(str(view_name), {})
 
     ci_container_lookup = {
         "pseudo_perplexity": ("confidence_intervals", "pseudo_perplexity"),
@@ -1982,6 +2066,10 @@ def _build_primary_eval_metric_snapshot(result: Dict[str, object]) -> Dict[str, 
         "metric_value": result.get(metric_key) if metric_key else None,
         "metric_confidence_interval": metric_ci,
         "better_direction": better_direction,
+        "estimand": metadata.get("estimand"),
+        "sample_axis": metadata.get("sample_axis"),
+        "weighting": metadata.get("weighting"),
+        "comparison_semantics": metadata.get("comparison_semantics"),
         "masked_token_accuracy_key": accuracy_key,
         "masked_token_accuracy_value": result.get(accuracy_key) if accuracy_key else None,
         "bits_saved_vs_uniform": calibration.get("bits_saved_vs_uniform"),
@@ -2134,10 +2222,12 @@ def _build_primary_comparison_metric_snapshot(comparison: Dict[str, object]) -> 
     winner = comparison.get("winner") or {}
     winner_confidence = comparison.get("winner_confidence") or {}
     delta_conf = ((comparison.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {}).get(metric_key) or {}
+    comparison_scope = (COMPARISON_VIEW_METADATA.get(metric_key) or {}).get("comparison_scope")
 
     return {
         "metric": metric_key,
         "view": primary.get("view"),
+        "comparison_scope": comparison_scope,
         "better_direction": "lower" if "accuracy" not in metric_key and "bits_saved" not in metric_key and "denoising_skill" not in metric_key else "higher",
         "cosine_value": cosine_model.get(metric_key),
         "linear_value": linear_model.get(metric_key),

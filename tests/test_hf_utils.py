@@ -401,6 +401,7 @@ class HuggingFaceModelCardTests(unittest.TestCase):
         self.assertIn("- primary_estimand: uniform-over-eligible-token-and-timestep denoising CE estimated from sampled draws", report)
         self.assertIn("Linear-vs-cosine comparison", report)
         self.assertIn("- primary_metric: timestep_auc_pseudo_perplexity", report)
+        self.assertIn("- primary_comparison_scope: shared normalized-timestep trajectory diagnostic", report)
         self.assertIn("- primary_winner: cosine_schedule", report)
         self.assertIn("- delta_ci_p05: -0.05", report)
         self.assertIn("- delta_ci_p95: 0.35", report)
