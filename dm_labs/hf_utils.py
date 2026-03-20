@@ -79,6 +79,18 @@ EVAL_VIEW_SPECS = [
         "aggregation": "inverse-expected-mask-ratio weighting over sampled masked tokens",
     },
     {
+        "view": "schedule_reweighted_ht",
+        "avg_cross_entropy_key": "schedule_reweighted_ht_avg_cross_entropy",
+        "pseudo_perplexity_key": "schedule_reweighted_ht_pseudo_perplexity",
+        "bits_key": "schedule_reweighted_ht_bits_per_masked_token",
+        "accuracy_key": "schedule_reweighted_ht_masked_token_accuracy",
+        "ci_container_key": "schedule_reweighted_ht_confidence_intervals",
+        "ci_ce_key": "schedule_reweighted_ht_avg_cross_entropy",
+        "ci_metric_key": "schedule_reweighted_ht_pseudo_perplexity",
+        "ci_accuracy_key": "schedule_reweighted_ht_masked_token_accuracy",
+        "aggregation": "Horvitz-Thompson inverse-mask-ratio estimate normalized by exact eligible-token count",
+    },
+    {
         "view": "fixed_grid_batch_uniform",
         "avg_cross_entropy_key": "grid_uniform_avg_cross_entropy",
         "pseudo_perplexity_key": "grid_uniform_pseudo_perplexity",
@@ -227,6 +239,42 @@ COMPARISON_VIEW_SPECS = [
         "linear_value_key": ("calibration", "schedule_reweighted", "denoising_skill"),
     },
     {
+        "metric_view": "schedule_reweighted_ht_pseudo_perplexity",
+        "delta_key": "schedule_reweighted_ht_pseudo_perplexity",
+        "winner_key": "schedule_reweighted_ht_pseudo_perplexity",
+        "ci_key": "schedule_reweighted_ht_pseudo_perplexity",
+        "better_direction": "lower",
+        "cosine_value_key": ("model", "schedule_reweighted_ht_pseudo_perplexity"),
+        "linear_value_key": ("model", "schedule_reweighted_ht_pseudo_perplexity"),
+    },
+    {
+        "metric_view": "schedule_reweighted_ht_bits_per_masked_token",
+        "delta_key": "schedule_reweighted_ht_bits_per_masked_token",
+        "winner_key": "schedule_reweighted_ht_bits_per_masked_token",
+        "ci_key": "schedule_reweighted_ht_bits_per_masked_token",
+        "better_direction": "lower",
+        "cosine_value_key": ("model", "schedule_reweighted_ht_bits_per_masked_token"),
+        "linear_value_key": ("model", "schedule_reweighted_ht_bits_per_masked_token"),
+    },
+    {
+        "metric_view": "schedule_reweighted_ht_bits_saved_vs_uniform",
+        "delta_key": "schedule_reweighted_ht_bits_saved_vs_uniform",
+        "winner_key": "schedule_reweighted_ht_bits_saved_vs_uniform",
+        "ci_key": "schedule_reweighted_ht_bits_saved_vs_uniform",
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "schedule_reweighted_ht", "bits_saved_vs_uniform"),
+        "linear_value_key": ("calibration", "schedule_reweighted_ht", "bits_saved_vs_uniform"),
+    },
+    {
+        "metric_view": "schedule_reweighted_ht_denoising_skill",
+        "delta_key": "schedule_reweighted_ht_denoising_skill",
+        "winner_key": "schedule_reweighted_ht_denoising_skill",
+        "ci_key": "schedule_reweighted_ht_denoising_skill",
+        "better_direction": "higher",
+        "cosine_value_key": ("calibration", "schedule_reweighted_ht", "denoising_skill"),
+        "linear_value_key": ("calibration", "schedule_reweighted_ht", "denoising_skill"),
+    },
+    {
         "metric_view": "grid_uniform_pseudo_perplexity",
         "delta_key": "grid_uniform_pseudo_perplexity",
         "winner_key": "grid_uniform_pseudo_perplexity",
@@ -360,6 +408,15 @@ COMPARISON_VIEW_SPECS = [
         "better_direction": "higher",
         "cosine_value_key": ("model", "schedule_reweighted_masked_token_accuracy"),
         "linear_value_key": ("model", "schedule_reweighted_masked_token_accuracy"),
+    },
+    {
+        "metric_view": "schedule_reweighted_ht_accuracy",
+        "delta_key": "schedule_reweighted_ht_masked_token_accuracy",
+        "winner_key": "schedule_reweighted_ht_masked_token_accuracy",
+        "ci_key": "schedule_reweighted_ht_masked_token_accuracy",
+        "better_direction": "higher",
+        "cosine_value_key": ("model", "schedule_reweighted_ht_masked_token_accuracy"),
+        "linear_value_key": ("model", "schedule_reweighted_ht_masked_token_accuracy"),
     },
     {
         "metric_view": "grid_uniform_accuracy",
@@ -577,17 +634,62 @@ def summarize_eval_for_hf(eval_summary: Optional[dict] = None) -> dict:
     if not eval_summary:
         return {}
     quality_summary = eval_summary.get("quality_summary") or {}
-    primary = quality_summary.get("recommended_primary_view") or {}
+    primary = eval_summary.get("primary_metric_snapshot") or {}
+    if not primary:
+        recommended = quality_summary.get("recommended_primary_view") or {}
+        metric_key = recommended.get("metric_key")
+        view_name = recommended.get("view")
+        matching_spec = next((spec for spec in EVAL_VIEW_SPECS if spec["view"] == view_name), None)
+        metric_ci = {}
+        accuracy_value = None
+        calibration = {}
+        if matching_spec is not None:
+            metric_ci = _extract_ci(eval_summary, matching_spec.get("ci_container_key"), matching_spec.get("ci_metric_key"))
+            accuracy_value = eval_summary.get(matching_spec.get("accuracy_key"))
+            calibration = _view_calibration(
+                eval_summary.get(matching_spec.get("avg_cross_entropy_key")),
+                eval_summary.get(matching_spec.get("bits_key")),
+                eval_summary.get("vocab_size"),
+            )
+            calibration.update(
+                _calibration_interval_from_ce_ci(
+                    _extract_ci(eval_summary, matching_spec.get("ci_container_key"), matching_spec.get("ci_ce_key")),
+                    eval_summary.get("vocab_size"),
+                )
+            )
+        primary = {
+            "view": view_name,
+            "metric_key": metric_key,
+            "metric_value": eval_summary.get(metric_key) if metric_key else None,
+            "metric_confidence_interval": metric_ci,
+            "better_direction": recommended.get("better_direction"),
+            "masked_token_accuracy_value": accuracy_value,
+            "bits_saved_vs_uniform": calibration.get("bits_saved_vs_uniform"),
+            "bits_saved_vs_uniform_ci_p05": calibration.get("bits_saved_vs_uniform_ci_p05"),
+            "bits_saved_vs_uniform_ci_p95": calibration.get("bits_saved_vs_uniform_ci_p95"),
+            "denoising_skill": calibration.get("denoising_skill"),
+            "denoising_skill_ci_p05": calibration.get("denoising_skill_ci_p05"),
+            "denoising_skill_ci_p95": calibration.get("denoising_skill_ci_p95"),
+            "rationale": recommended.get("rationale"),
+            "caveat": recommended.get("caveat"),
+        }
     metric_key = primary.get("metric_key")
     return {
         "metric": eval_summary.get("metric"),
         "primary_view": primary.get("view"),
         "primary_metric_key": metric_key,
-        "primary_metric_value": eval_summary.get(metric_key) if metric_key else None,
+        "primary_metric_value": primary.get("metric_value") if metric_key else None,
+        "primary_metric_ci": primary.get("metric_confidence_interval") or {},
         "primary_better_direction": primary.get("better_direction"),
+        "primary_bits_saved_vs_uniform": primary.get("bits_saved_vs_uniform"),
+        "primary_denoising_skill": primary.get("denoising_skill"),
+        "primary_masked_token_accuracy": primary.get("masked_token_accuracy_value"),
         "primary_rationale": primary.get("rationale"),
+        "primary_caveat": primary.get("caveat"),
         "schedule_reweighted_reliability": quality_summary.get("schedule_reweighted_reliability"),
         "schedule_reweighted_effective_sample_size_fraction": eval_summary.get("schedule_reweighted_effective_sample_size_fraction"),
+        "schedule_reweighted_exact_eligible_token_count": eval_summary.get("schedule_reweighted_exact_eligible_token_count"),
+        "schedule_reweighted_expected_masked_token_count": eval_summary.get("schedule_reweighted_expected_masked_token_count"),
         "sampled_example_count": eval_summary.get("sampled_example_count"),
         "masked_tokens": eval_summary.get("masked_tokens"),
         "normalized_timestep_remapping": bool((eval_summary.get("eval_protocol") or {}).get("normalized_timestep_remapping", False)),
@@ -598,17 +700,34 @@ def summarize_comparison_for_hf(comparison_summary: Optional[dict] = None) -> di
     if not comparison_summary:
         return {}
     decision_summary = comparison_summary.get("decision_summary") or {}
-    primary = decision_summary.get("recommended_primary_metric") or {}
-    metric_key = primary.get("metric")
+    primary = comparison_summary.get("primary_metric_snapshot") or {}
+    if not primary:
+        recommended = decision_summary.get("recommended_primary_metric") or {}
+        metric_key = recommended.get("metric")
+        primary = {
+            "metric": metric_key,
+            "view": recommended.get("view"),
+            "winner": recommended.get("winner"),
+            "delta_linear_minus_cosine": (comparison_summary.get("delta") or {}).get(metric_key) if metric_key else None,
+            "winner_confidence": (comparison_summary.get("winner_confidence") or {}).get(metric_key) or {},
+            "delta_confidence_interval": ((comparison_summary.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {}).get(metric_key) or {},
+            "rationale": recommended.get("rationale"),
+        }
+    winner_confidence = primary.get("winner_confidence") or {}
+    delta_ci = primary.get("delta_confidence_interval") or {}
     return {
         "headline": decision_summary.get("headline"),
-        "primary_metric": metric_key,
+        "primary_metric": primary.get("metric"),
         "primary_view": primary.get("view"),
         "primary_winner": primary.get("winner"),
-        "primary_winner_probability": primary.get("winner_probability"),
-        "primary_ci_excludes_zero": primary.get("ci_excludes_zero"),
-        "primary_practically_tied": primary.get("practically_tied"),
-        "primary_delta_linear_minus_cosine": (comparison_summary.get("delta") or {}).get(metric_key) if metric_key else None,
+        "primary_winner_probability": winner_confidence.get("winner_probability"),
+        "primary_ci_excludes_zero": winner_confidence.get("ci_excludes_zero"),
+        "primary_practically_tied": winner_confidence.get("practically_tied"),
+        "primary_delta_linear_minus_cosine": primary.get("delta_linear_minus_cosine"),
+        "primary_delta_ci": delta_ci,
+        "primary_cosine_value": primary.get("cosine_value"),
+        "primary_linear_value": primary.get("linear_value"),
+        "primary_rationale": primary.get("rationale"),
         "normalized_timestep_remapping": bool((comparison_summary.get("comparison_protocol") or {}).get("normalized_timestep_remapping", False)),
         "tracked_metric_count": decision_summary.get("tracked_metric_count"),
         "decisive_metric_count": decision_summary.get("decisive_metric_count"),
@@ -648,6 +767,8 @@ def render_eval_summary_report(
                 "Single-model evaluation",
                 f"- primary_view: {_format_report_scalar(primary_view)}",
                 f"- primary_metric: {_format_report_scalar(eval_snapshot.get('primary_metric_key'))} = {_format_report_scalar(eval_snapshot.get('primary_metric_value'))} ({_format_report_scalar(eval_snapshot.get('primary_better_direction'))} is better)",
+                f"- primary_metric_ci_p05: {_format_report_scalar((eval_snapshot.get('primary_metric_ci') or {}).get('p05'))}",
+                f"- primary_metric_ci_p95: {_format_report_scalar((eval_snapshot.get('primary_metric_ci') or {}).get('p95'))}",
                 f"- schedule_reweighted_reliability: {_format_report_scalar(eval_snapshot.get('schedule_reweighted_reliability'))}",
                 f"- sampled_example_count: {_format_report_scalar(eval_snapshot.get('sampled_example_count'))}",
                 f"- masked_tokens: {_format_report_scalar(eval_snapshot.get('masked_tokens'))}",
@@ -658,11 +779,18 @@ def render_eval_summary_report(
             lines.extend(
                 [
                     f"- primary_bits_per_masked_token: {_format_report_scalar(primary_row.get('bits_per_masked_token'))}",
-                    f"- primary_bits_saved_vs_uniform: {_format_report_scalar(primary_row.get('bits_saved_vs_uniform'))}",
-                    f"- primary_denoising_skill: {_format_report_scalar(primary_row.get('denoising_skill'))}",
-                    f"- primary_masked_token_accuracy: {_format_report_scalar(primary_row.get('masked_token_accuracy'))}",
+                    f"- primary_bits_saved_vs_uniform: {_format_report_scalar(eval_snapshot.get('primary_bits_saved_vs_uniform'))}",
+                    f"- primary_denoising_skill: {_format_report_scalar(eval_snapshot.get('primary_denoising_skill'))}",
+                    f"- primary_masked_token_accuracy: {_format_report_scalar(eval_snapshot.get('primary_masked_token_accuracy'))}",
                 ]
             )
+        lines.extend(
+            [
+                f"- schedule_reweighted_ht_pseudo_perplexity: {_format_report_scalar(eval_summary.get('schedule_reweighted_ht_pseudo_perplexity'))}",
+                f"- schedule_reweighted_ht_bits_saved_vs_uniform: {_format_report_scalar(((eval_summary.get('calibration') or {}).get('schedule_reweighted_ht') or {}).get('bits_saved_vs_uniform'))}",
+                f"- schedule_reweighted_exact_eligible_token_count: {_format_report_scalar(eval_summary.get('schedule_reweighted_exact_eligible_token_count'))}",
+            ]
+        )
         rationale = eval_snapshot.get("primary_rationale")
         if rationale:
             lines.append(f"- rationale: {rationale}")
@@ -685,6 +813,8 @@ def render_eval_summary_report(
                 f"- ci_excludes_zero: {_format_report_scalar(comparison_snapshot.get('primary_ci_excludes_zero'))}",
                 f"- practically_tied: {_format_report_scalar(comparison_snapshot.get('primary_practically_tied'))}",
                 f"- delta_linear_minus_cosine: {_format_report_scalar(comparison_snapshot.get('primary_delta_linear_minus_cosine'))}",
+                f"- delta_ci_p05: {_format_report_scalar((comparison_snapshot.get('primary_delta_ci') or {}).get('p05'))}",
+                f"- delta_ci_p95: {_format_report_scalar((comparison_snapshot.get('primary_delta_ci') or {}).get('p95'))}",
                 f"- normalized_timestep_remapping: {_format_report_scalar(comparison_snapshot.get('normalized_timestep_remapping'))}",
             ]
         )
@@ -874,6 +1004,8 @@ def ensure_hf_model_card(
                 f"- n_batches: {eval_summary.get('n_batches')}",
                 f"- schedule_reweighted_nonzero_examples: {eval_summary.get('schedule_reweighted_nonzero_examples')}",
                 f"- schedule_reweighted_estimated_eligible_token_count: {eval_summary.get('schedule_reweighted_estimated_eligible_token_count')}",
+                f"- schedule_reweighted_exact_eligible_token_count: {eval_summary.get('schedule_reweighted_exact_eligible_token_count')}",
+                f"- schedule_reweighted_expected_masked_token_count: {eval_summary.get('schedule_reweighted_expected_masked_token_count')}",
                 f"- schedule_reweighted_effective_sample_size: {eval_summary.get('schedule_reweighted_effective_sample_size')}",
                 f"- schedule_reweighted_effective_sample_size_fraction: {eval_summary.get('schedule_reweighted_effective_sample_size_fraction')}",
                 f"- timestep_macro_timestep_count: {eval_summary.get('timestep_macro_timestep_count')}",
@@ -896,6 +1028,7 @@ def ensure_hf_model_card(
                 f"- paired_batches: {protocol.get('paired_batches')}\n"
                 f"- sampled_timestep_distribution: {protocol.get('sampled_timestep_distribution')}\n"
                 f"- schedule_reweighted_aggregation: {protocol.get('schedule_reweighted_aggregation')}\n"
+                f"- schedule_reweighted_ht_aggregation: {protocol.get('schedule_reweighted_ht_aggregation')}\n"
                 f"- grid_uniform_aggregation: {protocol.get('grid_uniform_aggregation')}\n"
                 f"- timestep_macro_aggregation: {protocol.get('timestep_macro_aggregation')}\n"
                 f"- timestep_auc_aggregation: {protocol.get('timestep_auc_aggregation')}\n"
@@ -946,6 +1079,9 @@ def ensure_hf_model_card(
                     f"  - primary_view: {eval_snapshot.get('primary_view')}",
                     f"  - primary_metric_key: {eval_snapshot.get('primary_metric_key')}",
                     f"  - primary_metric_value: {eval_snapshot.get('primary_metric_value')}",
+                    f"  - primary_metric_ci: {eval_snapshot.get('primary_metric_ci')}",
+                    f"  - primary_bits_saved_vs_uniform: {eval_snapshot.get('primary_bits_saved_vs_uniform')}",
+                    f"  - primary_denoising_skill: {eval_snapshot.get('primary_denoising_skill')}",
                     f"  - schedule_reweighted_reliability: {eval_snapshot.get('schedule_reweighted_reliability')}",
                     f"  - normalized_timestep_remapping: {eval_snapshot.get('normalized_timestep_remapping')}",
                 ]
@@ -958,6 +1094,8 @@ def ensure_hf_model_card(
                     f"  - primary_metric: {comparison_snapshot.get('primary_metric')}",
                     f"  - primary_winner: {comparison_snapshot.get('primary_winner')}",
                     f"  - primary_winner_probability: {comparison_snapshot.get('primary_winner_probability')}",
+                    f"  - primary_delta_linear_minus_cosine: {comparison_snapshot.get('primary_delta_linear_minus_cosine')}",
+                    f"  - primary_delta_ci: {comparison_snapshot.get('primary_delta_ci')}",
                     f"  - primary_practically_tied: {comparison_snapshot.get('primary_practically_tied')}",
                     f"  - normalized_timestep_remapping: {comparison_snapshot.get('normalized_timestep_remapping')}",
                 ]

@@ -70,6 +70,17 @@ def _resolve_timestep_grid(T: int, timestep_grid: Optional[Sequence[int]] = None
     return sorted({int(max(1, min(T, t))) for t in timestep_grid})
 
 
+def _eligible_token_mask(
+    input_ids: Tensor,
+    attention_mask: Tensor,
+    excluded_token_ids: Optional[Sequence[Optional[int]]] = None,
+) -> Tensor:
+    can_mask = attention_mask.bool().clone()
+    for token_id in _normalize_excluded_token_ids(excluded_token_ids):
+        can_mask &= input_ids != token_id
+    return can_mask
+
+
 def _safe_exp(value: float) -> float:
     if math.isnan(value):
         return float("nan")
@@ -333,6 +344,81 @@ def _bootstrap_reweighted_metric_interval(
         ppx_key: {"mean": float(ppx_tensor.mean().item()), "p05": float(ppx_q[0]), "p50": float(ppx_q[1]), "p95": float(ppx_q[2])},
         bits_key: {"mean": float(bits_tensor.mean().item()), "p05": float(bits_q[0]), "p50": float(bits_q[1]), "p95": float(bits_q[2])},
         acc_key: {"mean": float(acc_tensor.mean().item()), "p05": float(acc_q[0]), "p50": float(acc_q[1]), "p95": float(acc_q[2])},
+    }
+
+
+def _bootstrap_reweighted_ht_metric_interval(
+    example_records: Sequence[Dict[str, float]],
+    *,
+    weight_key: str,
+    eligible_count_key: str = "eligible_token_count",
+    n_samples: int = 500,
+    seed: int = 0,
+) -> Dict[str, object]:
+    if not example_records:
+        return {
+            "method": f"bootstrap_over_example_records_horvitz_thompson_with_{weight_key}",
+            "n_examples": 0,
+            "replicates": 0,
+            "schedule_reweighted_ht_avg_cross_entropy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "schedule_reweighted_ht_pseudo_perplexity": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "schedule_reweighted_ht_bits_per_masked_token": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "schedule_reweighted_ht_masked_token_accuracy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+        }
+
+    rng = torch.Generator(device="cpu")
+    rng.manual_seed(seed)
+    n = len(example_records)
+    ce_samples: List[float] = []
+    acc_samples: List[float] = []
+
+    for _ in range(n_samples):
+        indices = torch.randint(0, n, (n,), generator=rng)
+        weighted_nll = 0.0
+        eligible_tokens = 0.0
+        weighted_correct = 0.0
+        for idx in indices.tolist():
+            rec = example_records[idx]
+            weight = float(rec.get(weight_key, 0.0))
+            eligible = float(rec.get(eligible_count_key, 0.0))
+            if eligible <= 0.0 or weight <= 0.0:
+                continue
+            weighted_nll += float(rec.get("nll_sum", 0.0)) * weight
+            weighted_correct += float(rec.get("correct_masked_tokens", 0.0)) * weight
+            eligible_tokens += eligible
+        if eligible_tokens <= 0.0:
+            continue
+        ce_samples.append(weighted_nll / eligible_tokens)
+        acc_samples.append(weighted_correct / eligible_tokens)
+
+    if not ce_samples:
+        return {
+            "method": f"bootstrap_over_example_records_horvitz_thompson_with_{weight_key}",
+            "n_examples": n,
+            "replicates": 0,
+            "schedule_reweighted_ht_avg_cross_entropy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "schedule_reweighted_ht_pseudo_perplexity": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "schedule_reweighted_ht_bits_per_masked_token": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+            "schedule_reweighted_ht_masked_token_accuracy": {"mean": float("nan"), "p05": float("nan"), "p50": float("nan"), "p95": float("nan")},
+        }
+
+    ce_tensor = torch.tensor(ce_samples, dtype=torch.float64)
+    ce_q = torch.quantile(ce_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    ppx_tensor = torch.tensor([_safe_exp(float(v)) for v in ce_samples], dtype=torch.float64)
+    ppx_q = torch.quantile(ppx_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    bits_tensor = torch.tensor([float(v) / math.log(2.0) for v in ce_samples], dtype=torch.float64)
+    bits_q = torch.quantile(bits_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+    acc_tensor = torch.tensor(acc_samples, dtype=torch.float64)
+    acc_q = torch.quantile(acc_tensor, torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64)).tolist()
+
+    return {
+        "method": f"bootstrap_over_example_records_horvitz_thompson_with_{weight_key}",
+        "n_examples": n,
+        "replicates": len(ce_samples),
+        "schedule_reweighted_ht_avg_cross_entropy": {"mean": float(ce_tensor.mean().item()), "p05": float(ce_q[0]), "p50": float(ce_q[1]), "p95": float(ce_q[2])},
+        "schedule_reweighted_ht_pseudo_perplexity": {"mean": float(ppx_tensor.mean().item()), "p05": float(ppx_q[0]), "p50": float(ppx_q[1]), "p95": float(ppx_q[2])},
+        "schedule_reweighted_ht_bits_per_masked_token": {"mean": float(bits_tensor.mean().item()), "p05": float(bits_q[0]), "p50": float(bits_q[1]), "p95": float(bits_q[2])},
+        "schedule_reweighted_ht_masked_token_accuracy": {"mean": float(acc_tensor.mean().item()), "p05": float(acc_q[0]), "p50": float(acc_q[1]), "p95": float(acc_q[2])},
     }
 
 
@@ -639,6 +725,10 @@ def _bootstrap_paired_comparison_interval(
         "schedule_reweighted_pseudo_perplexity": [],
         "schedule_reweighted_bits_per_masked_token": [],
         "schedule_reweighted_masked_token_accuracy": [],
+        "schedule_reweighted_ht_avg_cross_entropy": [],
+        "schedule_reweighted_ht_pseudo_perplexity": [],
+        "schedule_reweighted_ht_bits_per_masked_token": [],
+        "schedule_reweighted_ht_masked_token_accuracy": [],
     }
     grid_delta_samples = {
         "grid_uniform_avg_cross_entropy": [],
@@ -715,19 +805,35 @@ def _bootstrap_paired_comparison_interval(
                     linear_rw_tokens = 0.0
                     cosine_rw_correct = 0.0
                     linear_rw_correct = 0.0
+                    cosine_ht_nll = 0.0
+                    linear_ht_nll = 0.0
+                    cosine_ht_eligible = 0.0
+                    linear_ht_eligible = 0.0
+                    cosine_ht_correct = 0.0
+                    linear_ht_correct = 0.0
                     for idx in example_indices.tolist():
                         cosine_rec = cosine_example_metrics[idx]
                         linear_rec = linear_example_metrics[idx]
                         cosine_weight = float(cosine_rec.get("schedule_reweighted_weight", 0.0))
                         linear_weight = float(linear_rec.get("schedule_reweighted_weight", 0.0))
+                        cosine_eligible = float(cosine_rec.get("eligible_token_count", 0.0))
+                        linear_eligible = float(linear_rec.get("eligible_token_count", 0.0))
                         if cosine_weight > 0.0:
                             cosine_rw_nll += float(cosine_rec["nll_sum"]) * cosine_weight
                             cosine_rw_tokens += float(cosine_rec["masked_tokens"]) * cosine_weight
                             cosine_rw_correct += float(cosine_rec.get("correct_masked_tokens", 0)) * cosine_weight
+                            if cosine_eligible > 0.0:
+                                cosine_ht_nll += float(cosine_rec["nll_sum"]) * cosine_weight
+                                cosine_ht_correct += float(cosine_rec.get("correct_masked_tokens", 0)) * cosine_weight
+                                cosine_ht_eligible += cosine_eligible
                         if linear_weight > 0.0:
                             linear_rw_nll += float(linear_rec["nll_sum"]) * linear_weight
                             linear_rw_tokens += float(linear_rec["masked_tokens"]) * linear_weight
                             linear_rw_correct += float(linear_rec.get("correct_masked_tokens", 0)) * linear_weight
+                            if linear_eligible > 0.0:
+                                linear_ht_nll += float(linear_rec["nll_sum"]) * linear_weight
+                                linear_ht_correct += float(linear_rec.get("correct_masked_tokens", 0)) * linear_weight
+                                linear_ht_eligible += linear_eligible
                     if cosine_rw_tokens > 0.0 and linear_rw_tokens > 0.0:
                         cosine_rw_ce = cosine_rw_nll / cosine_rw_tokens
                         linear_rw_ce = linear_rw_nll / linear_rw_tokens
@@ -736,6 +842,15 @@ def _bootstrap_paired_comparison_interval(
                         example_delta_samples["schedule_reweighted_bits_per_masked_token"].append((linear_rw_ce - cosine_rw_ce) / math.log(2.0))
                         example_delta_samples["schedule_reweighted_masked_token_accuracy"].append(
                             (linear_rw_correct / linear_rw_tokens) - (cosine_rw_correct / cosine_rw_tokens)
+                        )
+                    if cosine_ht_eligible > 0.0 and linear_ht_eligible > 0.0:
+                        cosine_ht_ce = cosine_ht_nll / cosine_ht_eligible
+                        linear_ht_ce = linear_ht_nll / linear_ht_eligible
+                        example_delta_samples["schedule_reweighted_ht_avg_cross_entropy"].append(linear_ht_ce - cosine_ht_ce)
+                        example_delta_samples["schedule_reweighted_ht_pseudo_perplexity"].append(_safe_exp(linear_ht_ce) - _safe_exp(cosine_ht_ce))
+                        example_delta_samples["schedule_reweighted_ht_bits_per_masked_token"].append((linear_ht_ce - cosine_ht_ce) / math.log(2.0))
+                        example_delta_samples["schedule_reweighted_ht_masked_token_accuracy"].append(
+                            (linear_ht_correct / linear_ht_eligible) - (cosine_ht_correct / cosine_ht_eligible)
                         )
 
         if cosine_grid_batch_metrics is not None and linear_grid_batch_metrics is not None:
@@ -810,7 +925,7 @@ def _bootstrap_paired_comparison_interval(
     def _with_win_probability(metric_name: str, values: Sequence[float]) -> Dict[str, float]:
         if not values:
             return {**_metric_percentiles(values), "probability_linear_better": float("nan")}
-        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy", "schedule_reweighted_masked_token_accuracy", "grid_uniform_masked_token_accuracy", "timestep_macro_masked_token_accuracy", "timestep_auc_masked_token_accuracy"}
+        higher_is_better = metric_name in {"masked_token_accuracy", "timestep_uniform_masked_token_accuracy", "schedule_reweighted_masked_token_accuracy", "schedule_reweighted_ht_masked_token_accuracy", "grid_uniform_masked_token_accuracy", "timestep_macro_masked_token_accuracy", "timestep_auc_masked_token_accuracy"}
         wins = sum(v > 0.0 for v in values) if higher_is_better else sum(v < 0.0 for v in values)
         return {**_metric_percentiles(values), "probability_linear_better": float(wins / len(values))}
 
@@ -828,6 +943,8 @@ def _bootstrap_paired_comparison_interval(
             "timestep_uniform_denoising_skill": ("timestep_uniform_avg_cross_entropy", -1.0 / uniform_ce),
             "schedule_reweighted_bits_saved_vs_uniform": ("schedule_reweighted_bits_per_masked_token", -1.0),
             "schedule_reweighted_denoising_skill": ("schedule_reweighted_avg_cross_entropy", -1.0 / uniform_ce),
+            "schedule_reweighted_ht_bits_saved_vs_uniform": ("schedule_reweighted_ht_bits_per_masked_token", -1.0),
+            "schedule_reweighted_ht_denoising_skill": ("schedule_reweighted_ht_avg_cross_entropy", -1.0 / uniform_ce),
             "grid_uniform_bits_saved_vs_uniform": ("grid_uniform_bits_per_masked_token", -1.0),
             "grid_uniform_denoising_skill": ("grid_uniform_avg_cross_entropy", -1.0 / uniform_ce),
             "timestep_macro_bits_saved_vs_uniform": ("timestep_macro_bits_per_masked_token", -1.0),
@@ -921,9 +1038,11 @@ def corrupt_with_mask(
     B, L = input_ids.shape
     ratio = schedule_fn(t, T).unsqueeze(1)
 
-    can_mask = attention_mask.bool().clone()
-    for token_id in _normalize_excluded_token_ids(excluded_token_ids):
-        can_mask &= input_ids != token_id
+    can_mask = _eligible_token_mask(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        excluded_token_ids=excluded_token_ids,
+    )
 
     if rand is None:
         rand = torch.rand((B, L), device=input_ids.device, generator=generator)
@@ -1026,10 +1145,16 @@ def _empty_eval_result(
         "schedule_reweighted_pseudo_perplexity": float("nan"),
         "schedule_reweighted_bits_per_masked_token": float("nan"),
         "schedule_reweighted_masked_token_accuracy": float("nan"),
+        "schedule_reweighted_ht_avg_cross_entropy": float("nan"),
+        "schedule_reweighted_ht_pseudo_perplexity": float("nan"),
+        "schedule_reweighted_ht_bits_per_masked_token": float("nan"),
+        "schedule_reweighted_ht_masked_token_accuracy": float("nan"),
         "schedule_reweighted_effective_sample_size": float("nan"),
         "schedule_reweighted_effective_sample_size_fraction": float("nan"),
         "schedule_reweighted_nonzero_examples": 0,
         "schedule_reweighted_estimated_eligible_token_count": 0.0,
+        "schedule_reweighted_exact_eligible_token_count": 0.0,
+        "schedule_reweighted_expected_masked_token_count": 0.0,
         "timestep_uniform_confidence_intervals": _bootstrap_example_uniform_metric_interval([], n_samples=0, seed=seed),
         "grid_uniform_avg_cross_entropy": float("nan"),
         "grid_uniform_pseudo_perplexity": float("nan"),
@@ -1058,6 +1183,7 @@ def _empty_eval_result(
         "excluded_token_ids": _normalize_excluded_token_ids(excluded_token_ids),
         "confidence_intervals": _bootstrap_metric_interval([], n_samples=0, seed=seed),
         "schedule_reweighted_confidence_intervals": _bootstrap_reweighted_metric_interval([], weight_key="schedule_reweighted_weight", n_samples=0, seed=seed),
+        "schedule_reweighted_ht_confidence_intervals": _bootstrap_reweighted_ht_metric_interval([], weight_key="schedule_reweighted_weight", n_samples=0, seed=seed),
         "grid_uniform_confidence_intervals": _bootstrap_grid_uniform_metric_interval([], n_samples=0, seed=seed),
         "timestep_confidence_intervals": _bootstrap_timestep_metric_interval([], n_samples=0, seed=seed),
         "calibration": {},
@@ -1098,6 +1224,10 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
     schedule_reweighted_correct = 0.0
     schedule_reweighted_token_masses: List[float] = []
     schedule_reweighted_nonzero_examples = 0
+    schedule_reweighted_exact_eligible_token_count = 0.0
+    schedule_reweighted_expected_masked_token_count = 0.0
+    schedule_reweighted_ht_nll_sum = 0.0
+    schedule_reweighted_ht_correct = 0.0
     timestep_records: Dict[int, Dict[str, float]] = {}
     sampled_batch_metrics: List[Dict[str, float]] = []
     sampled_example_metrics: List[Dict[str, float]] = []
@@ -1107,6 +1237,11 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
     for batch_idx, batch_plan in enumerate(eval_plan["batches"]):
         input_ids = batch_plan["input_ids"].to(device)
         attention_mask = batch_plan["attention_mask"].to(device)
+        eligible_mask = _eligible_token_mask(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            excluded_token_ids=excluded_token_ids,
+        )
         batch_active_tokens = int(batch_plan.get("active_tokens", int(attention_mask.sum().item())))
 
         for timestep_plan in batch_plan["timestep_plans"]:
@@ -1165,28 +1300,43 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 for example_idx in range(input_ids.size(0)):
                     example_mask = mask_positions[example_idx]
                     example_masked_tokens = int(example_mask.sum().item())
-                    if example_masked_tokens == 0:
-                        continue
-                    example_logits = logits[example_idx][example_mask]
-                    example_targets = labels[example_idx][example_mask]
-                    example_nll_sum = float(F.cross_entropy(example_logits, example_targets, reduction="sum").item())
-                    example_ce = example_nll_sum / example_masked_tokens
-                    example_correct = _expected_top1_correct_count(example_logits, example_targets)
-                    example_accuracy = example_correct / example_masked_tokens
-                    sampled_example_ce_sum += example_ce
-                    sampled_example_accuracy_sum += example_accuracy
-                    sampled_example_count += 1
+                    example_eligible_tokens = int(eligible_mask[example_idx].sum().item())
+                    expected_mask_ratio = float("nan")
+                    expected_masked_tokens = float("nan")
                     schedule_reweighted_weight = 0.0
+                    example_nll_sum = 0.0
+                    example_correct = 0.0
+                    example_ce = float("nan")
+                    example_accuracy = float("nan")
+
                     if schedule_fn is not None:
                         expected_mask_ratio = float(schedule_fn(eval_t[example_idx:example_idx + 1], T).item())
-                        if expected_mask_ratio > 0.0:
+                        expected_masked_tokens = float(example_eligible_tokens) * expected_mask_ratio
+                        if example_eligible_tokens > 0 and expected_mask_ratio > 0.0:
                             schedule_reweighted_weight = 1.0 / expected_mask_ratio
+                            schedule_reweighted_exact_eligible_token_count += float(example_eligible_tokens)
+                            schedule_reweighted_expected_masked_token_count += expected_masked_tokens
+                            schedule_reweighted_nonzero_examples += 1
+
+                    if example_masked_tokens > 0:
+                        example_logits = logits[example_idx][example_mask]
+                        example_targets = labels[example_idx][example_mask]
+                        example_nll_sum = float(F.cross_entropy(example_logits, example_targets, reduction="sum").item())
+                        example_ce = example_nll_sum / example_masked_tokens
+                        example_correct = _expected_top1_correct_count(example_logits, example_targets)
+                        example_accuracy = example_correct / example_masked_tokens
+                        sampled_example_ce_sum += example_ce
+                        sampled_example_accuracy_sum += example_accuracy
+                        sampled_example_count += 1
+                        if schedule_reweighted_weight > 0.0:
                             weighted_token_mass = example_masked_tokens * schedule_reweighted_weight
                             schedule_reweighted_nll_sum += example_nll_sum * schedule_reweighted_weight
                             schedule_reweighted_masked_tokens += weighted_token_mass
                             schedule_reweighted_correct += example_correct * schedule_reweighted_weight
+                            schedule_reweighted_ht_nll_sum += example_nll_sum * schedule_reweighted_weight
+                            schedule_reweighted_ht_correct += example_correct * schedule_reweighted_weight
                             schedule_reweighted_token_masses.append(float(weighted_token_mass))
-                            schedule_reweighted_nonzero_examples += 1
+
                     sampled_example_metrics.append(
                         {
                             "batch_index": batch_idx,
@@ -1194,12 +1344,15 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                             "timestep": int(eval_t[example_idx].item()),
                             "source_plan_timestep": int(source_timestep[example_idx].item()),
                             "timestep_fraction": float(timestep_fraction[example_idx].item()),
+                            "eligible_token_count": example_eligible_tokens,
+                            "expected_mask_ratio": expected_mask_ratio,
+                            "expected_masked_tokens": expected_masked_tokens,
                             "nll_sum": example_nll_sum,
                             "masked_tokens": example_masked_tokens,
                             "correct_masked_tokens": example_correct,
                             "avg_cross_entropy": example_ce,
                             "pseudo_perplexity": _safe_exp(example_ce),
-                            "bits_per_masked_token": example_ce / math.log(2.0),
+                            "bits_per_masked_token": example_ce / math.log(2.0) if not math.isnan(example_ce) else float("nan"),
                             "masked_token_accuracy": example_accuracy,
                             "schedule_reweighted_weight": schedule_reweighted_weight,
                         }
@@ -1301,6 +1454,16 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             schedule_reweighted_avg_ce = float("nan")
             schedule_reweighted_masked_token_accuracy = float("nan")
 
+        if schedule_reweighted_exact_eligible_token_count > 0.0:
+            schedule_reweighted_ht_avg_ce = schedule_reweighted_ht_nll_sum / schedule_reweighted_exact_eligible_token_count
+            schedule_reweighted_ht_masked_token_accuracy = schedule_reweighted_ht_correct / schedule_reweighted_exact_eligible_token_count
+        elif timestep_metrics:
+            schedule_reweighted_ht_avg_ce = sum(float(row["avg_cross_entropy"]) for row in timestep_metrics) / len(timestep_metrics)
+            schedule_reweighted_ht_masked_token_accuracy = sum(float(row["masked_token_accuracy"]) for row in timestep_metrics) / len(timestep_metrics)
+        else:
+            schedule_reweighted_ht_avg_ce = float("nan")
+            schedule_reweighted_ht_masked_token_accuracy = float("nan")
+
         if schedule_reweighted_token_masses:
             schedule_reweighted_mass_sum = float(sum(schedule_reweighted_token_masses))
             schedule_reweighted_mass_sq_sum = float(sum(mass * mass for mass in schedule_reweighted_token_masses))
@@ -1363,10 +1526,16 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
             "schedule_reweighted_pseudo_perplexity": _safe_exp(schedule_reweighted_avg_ce),
             "schedule_reweighted_bits_per_masked_token": schedule_reweighted_avg_ce / math.log(2.0) if not math.isnan(schedule_reweighted_avg_ce) else float("nan"),
             "schedule_reweighted_masked_token_accuracy": schedule_reweighted_masked_token_accuracy,
+            "schedule_reweighted_ht_avg_cross_entropy": schedule_reweighted_ht_avg_ce,
+            "schedule_reweighted_ht_pseudo_perplexity": _safe_exp(schedule_reweighted_ht_avg_ce),
+            "schedule_reweighted_ht_bits_per_masked_token": schedule_reweighted_ht_avg_ce / math.log(2.0) if not math.isnan(schedule_reweighted_ht_avg_ce) else float("nan"),
+            "schedule_reweighted_ht_masked_token_accuracy": schedule_reweighted_ht_masked_token_accuracy,
             "schedule_reweighted_effective_sample_size": schedule_reweighted_effective_sample_size,
             "schedule_reweighted_effective_sample_size_fraction": schedule_reweighted_effective_sample_size_fraction,
             "schedule_reweighted_nonzero_examples": schedule_reweighted_nonzero_examples,
             "schedule_reweighted_estimated_eligible_token_count": schedule_reweighted_mass_sum,
+            "schedule_reweighted_exact_eligible_token_count": schedule_reweighted_exact_eligible_token_count,
+            "schedule_reweighted_expected_masked_token_count": schedule_reweighted_expected_masked_token_count,
             "grid_uniform_avg_cross_entropy": grid_uniform_avg_ce,
             "grid_uniform_pseudo_perplexity": _safe_exp(grid_uniform_avg_ce),
             "grid_uniform_bits_per_masked_token": grid_uniform_avg_ce / math.log(2.0) if not math.isnan(grid_uniform_avg_ce) else float("nan"),
@@ -1394,6 +1563,12 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
                 seed=int(eval_plan.get("seed", 0)),
             ),
             "schedule_reweighted_confidence_intervals": _bootstrap_reweighted_metric_interval(
+                ci_example_metrics,
+                weight_key="schedule_reweighted_weight",
+                n_samples=bootstrap_samples,
+                seed=int(eval_plan.get("seed", 0)),
+            ),
+            "schedule_reweighted_ht_confidence_intervals": _bootstrap_reweighted_ht_metric_interval(
                 ci_example_metrics,
                 weight_key="schedule_reweighted_weight",
                 n_samples=bootstrap_samples,
@@ -1437,6 +1612,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
         "paired_batches": True,
         "sampled_timestep_distribution": "uniform_integer_1_to_eval_plan_T_then_remapped_by_fraction_per_model",
         "schedule_reweighted_aggregation": "inverse_expected_mask_ratio_weighting_over_sampled_masked_tokens",
+        "schedule_reweighted_ht_aggregation": "horvitz_thompson_inverse_expected_mask_ratio_estimator_over_exact_eligible_tokens",
         "grid_uniform_aggregation": "mean_over_cached_batch_timestep_records",
         "timestep_macro_aggregation": "mean_over_token_weighted_per_timestep_metrics_on_cached_grid",
         "timestep_auc_aggregation": "normalized_trapezoid_integral_over_token_weighted_per_timestep_metrics_on_cached_grid",
@@ -1444,6 +1620,7 @@ def evaluate_diffusion_pseudo_perplexity_from_plan(
     }
     result["calibration"] = _build_calibration_view_summaries(result)
     result["quality_summary"] = _build_eval_quality_summary(result)
+    result["primary_metric_snapshot"] = _build_primary_eval_metric_snapshot(result)
     return result
 
 
@@ -1541,6 +1718,12 @@ EVAL_CALIBRATION_VIEW_SPECS = {
         "bits_key": "schedule_reweighted_bits_per_masked_token",
         "ci_container_key": "schedule_reweighted_confidence_intervals",
         "ci_ce_key": "schedule_reweighted_avg_cross_entropy",
+    },
+    "schedule_reweighted_ht": {
+        "avg_cross_entropy_key": "schedule_reweighted_ht_avg_cross_entropy",
+        "bits_key": "schedule_reweighted_ht_bits_per_masked_token",
+        "ci_container_key": "schedule_reweighted_ht_confidence_intervals",
+        "ci_ce_key": "schedule_reweighted_ht_avg_cross_entropy",
     },
     "grid_uniform": {
         "avg_cross_entropy_key": "grid_uniform_avg_cross_entropy",
@@ -1746,6 +1929,73 @@ def _build_eval_quality_summary(result: Dict[str, object]) -> Dict[str, object]:
     }
 
 
+def _build_primary_eval_metric_snapshot(result: Dict[str, object]) -> Dict[str, object]:
+    quality_summary = result.get("quality_summary") or {}
+    recommended = quality_summary.get("recommended_primary_view") or _recommend_primary_eval_view(result)
+    metric_key = recommended.get("metric_key")
+    better_direction = recommended.get("better_direction")
+    view_name = recommended.get("view")
+    view_key_map = {
+        "token_weighted_sampled": "sampled",
+        "timestep_uniform_sampled": "timestep_uniform",
+        "schedule_reweighted_sampled": "schedule_reweighted",
+        "schedule_reweighted_ht": "schedule_reweighted_ht",
+        "fixed_grid_batch_uniform": "grid_uniform",
+        "fixed_grid_timestep_macro": "timestep_macro",
+        "fixed_grid_timestep_auc": "timestep_auc",
+    }
+    calibration_key = view_key_map.get(str(view_name), "sampled")
+    calibration = (result.get("calibration") or {}).get(calibration_key) or {}
+
+    ci_container_lookup = {
+        "pseudo_perplexity": ("confidence_intervals", "pseudo_perplexity"),
+        "masked_token_accuracy": ("confidence_intervals", "masked_token_accuracy"),
+        "timestep_uniform_pseudo_perplexity": ("timestep_uniform_confidence_intervals", "timestep_uniform_pseudo_perplexity"),
+        "timestep_uniform_masked_token_accuracy": ("timestep_uniform_confidence_intervals", "timestep_uniform_masked_token_accuracy"),
+        "schedule_reweighted_pseudo_perplexity": ("schedule_reweighted_confidence_intervals", "schedule_reweighted_pseudo_perplexity"),
+        "schedule_reweighted_masked_token_accuracy": ("schedule_reweighted_confidence_intervals", "schedule_reweighted_masked_token_accuracy"),
+        "schedule_reweighted_ht_pseudo_perplexity": ("schedule_reweighted_ht_confidence_intervals", "schedule_reweighted_ht_pseudo_perplexity"),
+        "schedule_reweighted_ht_masked_token_accuracy": ("schedule_reweighted_ht_confidence_intervals", "schedule_reweighted_ht_masked_token_accuracy"),
+        "grid_uniform_pseudo_perplexity": ("grid_uniform_confidence_intervals", "grid_uniform_pseudo_perplexity"),
+        "grid_uniform_masked_token_accuracy": ("grid_uniform_confidence_intervals", "grid_uniform_masked_token_accuracy"),
+        "timestep_macro_pseudo_perplexity": ("timestep_confidence_intervals", "timestep_macro_pseudo_perplexity"),
+        "timestep_macro_masked_token_accuracy": ("timestep_confidence_intervals", "timestep_macro_masked_token_accuracy"),
+        "timestep_auc_pseudo_perplexity": ("timestep_confidence_intervals", "timestep_auc_pseudo_perplexity"),
+        "timestep_auc_masked_token_accuracy": ("timestep_confidence_intervals", "timestep_auc_masked_token_accuracy"),
+    }
+    ci_container_key, ci_metric_key = ci_container_lookup.get(str(metric_key), (None, None))
+    metric_ci = ((result.get(ci_container_key) or {}).get(ci_metric_key) or {}) if ci_container_key and ci_metric_key else {}
+
+    accuracy_key = {
+        "token_weighted_sampled": "masked_token_accuracy",
+        "timestep_uniform_sampled": "timestep_uniform_masked_token_accuracy",
+        "schedule_reweighted_sampled": "schedule_reweighted_masked_token_accuracy",
+        "schedule_reweighted_ht": "schedule_reweighted_ht_masked_token_accuracy",
+        "fixed_grid_batch_uniform": "grid_uniform_masked_token_accuracy",
+        "fixed_grid_timestep_macro": "timestep_macro_masked_token_accuracy",
+        "fixed_grid_timestep_auc": "timestep_auc_masked_token_accuracy",
+    }.get(str(view_name))
+
+    return {
+        "view": view_name,
+        "metric_key": metric_key,
+        "metric_value": result.get(metric_key) if metric_key else None,
+        "metric_confidence_interval": metric_ci,
+        "better_direction": better_direction,
+        "masked_token_accuracy_key": accuracy_key,
+        "masked_token_accuracy_value": result.get(accuracy_key) if accuracy_key else None,
+        "bits_saved_vs_uniform": calibration.get("bits_saved_vs_uniform"),
+        "bits_saved_vs_uniform_ci_p05": calibration.get("bits_saved_vs_uniform_ci_p05"),
+        "bits_saved_vs_uniform_ci_p95": calibration.get("bits_saved_vs_uniform_ci_p95"),
+        "denoising_skill": calibration.get("denoising_skill"),
+        "denoising_skill_ci_p05": calibration.get("denoising_skill_ci_p05"),
+        "denoising_skill_ci_p95": calibration.get("denoising_skill_ci_p95"),
+        "rationale": recommended.get("rationale"),
+        "caveat": recommended.get("caveat"),
+        "schedule_reweighted_reliability": quality_summary.get("schedule_reweighted_reliability"),
+    }
+
+
 def _recommend_comparison_primary_metric(comparison: Dict[str, object]) -> Dict[str, object]:
     protocol = comparison.get("comparison_protocol") or {}
     models = comparison.get("models") or []
@@ -1800,6 +2050,7 @@ def _build_comparison_decision_summary(comparison: Dict[str, object]) -> Dict[st
         ("sampled_pseudo_perplexity", "pseudo_perplexity", "lower"),
         ("timestep_uniform_pseudo_perplexity", "timestep_uniform_pseudo_perplexity", "lower"),
         ("schedule_reweighted_pseudo_perplexity", "schedule_reweighted_pseudo_perplexity", "lower"),
+        ("schedule_reweighted_ht_pseudo_perplexity", "schedule_reweighted_ht_pseudo_perplexity", "lower"),
         ("grid_uniform_pseudo_perplexity", "grid_uniform_pseudo_perplexity", "lower"),
         ("timestep_macro_pseudo_perplexity", "timestep_macro_pseudo_perplexity", "lower"),
         ("timestep_auc_pseudo_perplexity", "timestep_auc_pseudo_perplexity", "lower"),
@@ -1871,6 +2122,31 @@ def _build_comparison_decision_summary(comparison: Dict[str, object]) -> Dict[st
             "rationale": primary_rationale,
         },
         "tracked_metrics": rows,
+    }
+
+
+def _build_primary_comparison_metric_snapshot(comparison: Dict[str, object]) -> Dict[str, object]:
+    primary = _recommend_comparison_primary_metric(comparison)
+    metric_key = str(primary.get("metric") or "timestep_auc_pseudo_perplexity")
+    models = comparison.get("models") or []
+    cosine_model = models[0] if len(models) > 0 else {}
+    linear_model = models[1] if len(models) > 1 else {}
+    winner = comparison.get("winner") or {}
+    winner_confidence = comparison.get("winner_confidence") or {}
+    delta_conf = ((comparison.get("delta_confidence_intervals") or {}).get("delta_linear_minus_cosine") or {}).get(metric_key) or {}
+
+    return {
+        "metric": metric_key,
+        "view": primary.get("view"),
+        "better_direction": "lower" if "accuracy" not in metric_key and "bits_saved" not in metric_key and "denoising_skill" not in metric_key else "higher",
+        "cosine_value": cosine_model.get(metric_key),
+        "linear_value": linear_model.get(metric_key),
+        "delta_linear_minus_cosine": (comparison.get("delta") or {}).get(metric_key),
+        "delta_confidence_interval": delta_conf,
+        "winner": winner.get(metric_key),
+        "winner_confidence": winner_confidence.get(metric_key) or {},
+        "rationale": primary.get("rationale"),
+        "normalized_timestep_remapping": bool((comparison.get("comparison_protocol") or {}).get("normalized_timestep_remapping", False)),
     }
 
 
@@ -1974,6 +2250,10 @@ def compare_schedule_checkpoints(
             "schedule_reweighted_avg_cross_entropy": models[1]["schedule_reweighted_avg_cross_entropy"] - models[0]["schedule_reweighted_avg_cross_entropy"],
             "schedule_reweighted_bits_per_masked_token": models[1]["schedule_reweighted_bits_per_masked_token"] - models[0]["schedule_reweighted_bits_per_masked_token"],
             "schedule_reweighted_masked_token_accuracy": models[1]["schedule_reweighted_masked_token_accuracy"] - models[0]["schedule_reweighted_masked_token_accuracy"],
+            "schedule_reweighted_ht_pseudo_perplexity": models[1]["schedule_reweighted_ht_pseudo_perplexity"] - models[0]["schedule_reweighted_ht_pseudo_perplexity"],
+            "schedule_reweighted_ht_avg_cross_entropy": models[1]["schedule_reweighted_ht_avg_cross_entropy"] - models[0]["schedule_reweighted_ht_avg_cross_entropy"],
+            "schedule_reweighted_ht_bits_per_masked_token": models[1]["schedule_reweighted_ht_bits_per_masked_token"] - models[0]["schedule_reweighted_ht_bits_per_masked_token"],
+            "schedule_reweighted_ht_masked_token_accuracy": models[1]["schedule_reweighted_ht_masked_token_accuracy"] - models[0]["schedule_reweighted_ht_masked_token_accuracy"],
             "grid_uniform_pseudo_perplexity": models[1]["grid_uniform_pseudo_perplexity"] - models[0]["grid_uniform_pseudo_perplexity"],
             "grid_uniform_avg_cross_entropy": models[1]["grid_uniform_avg_cross_entropy"] - models[0]["grid_uniform_avg_cross_entropy"],
             "grid_uniform_bits_per_masked_token": models[1]["grid_uniform_bits_per_masked_token"] - models[0]["grid_uniform_bits_per_masked_token"],
@@ -1992,6 +2272,8 @@ def compare_schedule_checkpoints(
             "timestep_uniform_denoising_skill": linear_calibration["timestep_uniform"]["denoising_skill"] - cosine_calibration["timestep_uniform"]["denoising_skill"],
             "schedule_reweighted_bits_saved_vs_uniform": linear_calibration["schedule_reweighted"]["bits_saved_vs_uniform"] - cosine_calibration["schedule_reweighted"]["bits_saved_vs_uniform"],
             "schedule_reweighted_denoising_skill": linear_calibration["schedule_reweighted"]["denoising_skill"] - cosine_calibration["schedule_reweighted"]["denoising_skill"],
+            "schedule_reweighted_ht_bits_saved_vs_uniform": linear_calibration["schedule_reweighted_ht"]["bits_saved_vs_uniform"] - cosine_calibration["schedule_reweighted_ht"]["bits_saved_vs_uniform"],
+            "schedule_reweighted_ht_denoising_skill": linear_calibration["schedule_reweighted_ht"]["denoising_skill"] - cosine_calibration["schedule_reweighted_ht"]["denoising_skill"],
             "grid_uniform_bits_saved_vs_uniform": linear_calibration["grid_uniform"]["bits_saved_vs_uniform"] - cosine_calibration["grid_uniform"]["bits_saved_vs_uniform"],
             "grid_uniform_denoising_skill": linear_calibration["grid_uniform"]["denoising_skill"] - cosine_calibration["grid_uniform"]["denoising_skill"],
             "timestep_macro_bits_saved_vs_uniform": linear_calibration["timestep_macro"]["bits_saved_vs_uniform"] - cosine_calibration["timestep_macro"]["bits_saved_vs_uniform"],
@@ -2014,6 +2296,9 @@ def compare_schedule_checkpoints(
             "schedule_reweighted_pseudo_perplexity": "cosine_schedule" if models[0]["schedule_reweighted_pseudo_perplexity"] <= models[1]["schedule_reweighted_pseudo_perplexity"] else "linear_schedule_baseline",
             "schedule_reweighted_avg_cross_entropy": "cosine_schedule" if models[0]["schedule_reweighted_avg_cross_entropy"] <= models[1]["schedule_reweighted_avg_cross_entropy"] else "linear_schedule_baseline",
             "schedule_reweighted_masked_token_accuracy": "cosine_schedule" if models[0]["schedule_reweighted_masked_token_accuracy"] >= models[1]["schedule_reweighted_masked_token_accuracy"] else "linear_schedule_baseline",
+            "schedule_reweighted_ht_pseudo_perplexity": "cosine_schedule" if models[0]["schedule_reweighted_ht_pseudo_perplexity"] <= models[1]["schedule_reweighted_ht_pseudo_perplexity"] else "linear_schedule_baseline",
+            "schedule_reweighted_ht_avg_cross_entropy": "cosine_schedule" if models[0]["schedule_reweighted_ht_avg_cross_entropy"] <= models[1]["schedule_reweighted_ht_avg_cross_entropy"] else "linear_schedule_baseline",
+            "schedule_reweighted_ht_masked_token_accuracy": "cosine_schedule" if models[0]["schedule_reweighted_ht_masked_token_accuracy"] >= models[1]["schedule_reweighted_ht_masked_token_accuracy"] else "linear_schedule_baseline",
             "grid_uniform_pseudo_perplexity": "cosine_schedule" if models[0]["grid_uniform_pseudo_perplexity"] <= models[1]["grid_uniform_pseudo_perplexity"] else "linear_schedule_baseline",
             "grid_uniform_avg_cross_entropy": "cosine_schedule" if models[0]["grid_uniform_avg_cross_entropy"] <= models[1]["grid_uniform_avg_cross_entropy"] else "linear_schedule_baseline",
             "grid_uniform_bits_per_masked_token": "cosine_schedule" if models[0]["grid_uniform_bits_per_masked_token"] <= models[1]["grid_uniform_bits_per_masked_token"] else "linear_schedule_baseline",
@@ -2030,6 +2315,8 @@ def compare_schedule_checkpoints(
             "timestep_uniform_denoising_skill": "cosine_schedule" if cosine_calibration["timestep_uniform"]["denoising_skill"] >= linear_calibration["timestep_uniform"]["denoising_skill"] else "linear_schedule_baseline",
             "schedule_reweighted_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["schedule_reweighted"]["bits_saved_vs_uniform"] >= linear_calibration["schedule_reweighted"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
             "schedule_reweighted_denoising_skill": "cosine_schedule" if cosine_calibration["schedule_reweighted"]["denoising_skill"] >= linear_calibration["schedule_reweighted"]["denoising_skill"] else "linear_schedule_baseline",
+            "schedule_reweighted_ht_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["schedule_reweighted_ht"]["bits_saved_vs_uniform"] >= linear_calibration["schedule_reweighted_ht"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
+            "schedule_reweighted_ht_denoising_skill": "cosine_schedule" if cosine_calibration["schedule_reweighted_ht"]["denoising_skill"] >= linear_calibration["schedule_reweighted_ht"]["denoising_skill"] else "linear_schedule_baseline",
             "grid_uniform_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["grid_uniform"]["bits_saved_vs_uniform"] >= linear_calibration["grid_uniform"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
             "grid_uniform_denoising_skill": "cosine_schedule" if cosine_calibration["grid_uniform"]["denoising_skill"] >= linear_calibration["grid_uniform"]["denoising_skill"] else "linear_schedule_baseline",
             "timestep_macro_bits_saved_vs_uniform": "cosine_schedule" if cosine_calibration["timestep_macro"]["bits_saved_vs_uniform"] >= linear_calibration["timestep_macro"]["bits_saved_vs_uniform"] else "linear_schedule_baseline",
@@ -2079,6 +2366,10 @@ def compare_schedule_checkpoints(
             "schedule_reweighted_avg_cross_entropy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_avg_cross_entropy"), better_direction="lower"),
             "schedule_reweighted_bits_per_masked_token": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_bits_per_masked_token"), better_direction="lower"),
             "schedule_reweighted_masked_token_accuracy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_masked_token_accuracy"), better_direction="higher"),
+            "schedule_reweighted_ht_pseudo_perplexity": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_ht_pseudo_perplexity"), better_direction="lower"),
+            "schedule_reweighted_ht_avg_cross_entropy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_ht_avg_cross_entropy"), better_direction="lower"),
+            "schedule_reweighted_ht_bits_per_masked_token": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_ht_bits_per_masked_token"), better_direction="lower"),
+            "schedule_reweighted_ht_masked_token_accuracy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_ht_masked_token_accuracy"), better_direction="higher"),
             "grid_uniform_pseudo_perplexity": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_pseudo_perplexity"), better_direction="lower"),
             "grid_uniform_avg_cross_entropy": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_avg_cross_entropy"), better_direction="lower"),
             "grid_uniform_bits_per_masked_token": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_bits_per_masked_token"), better_direction="lower"),
@@ -2097,6 +2388,8 @@ def compare_schedule_checkpoints(
             "timestep_uniform_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_uniform_denoising_skill"), better_direction="higher"),
             "schedule_reweighted_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_bits_saved_vs_uniform"), better_direction="higher"),
             "schedule_reweighted_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_denoising_skill"), better_direction="higher"),
+            "schedule_reweighted_ht_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_ht_bits_saved_vs_uniform"), better_direction="higher"),
+            "schedule_reweighted_ht_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("schedule_reweighted_ht_denoising_skill"), better_direction="higher"),
             "grid_uniform_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_bits_saved_vs_uniform"), better_direction="higher"),
             "grid_uniform_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("grid_uniform_denoising_skill"), better_direction="higher"),
             "timestep_macro_bits_saved_vs_uniform": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_macro_bits_saved_vs_uniform"), better_direction="higher"),
@@ -2105,6 +2398,7 @@ def compare_schedule_checkpoints(
             "timestep_auc_denoising_skill": _paired_delta_confidence_summary(comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"].get("timestep_auc_denoising_skill"), better_direction="higher"),
         }
         comparison["decision_summary"] = _build_comparison_decision_summary(comparison)
+        comparison["primary_metric_snapshot"] = _build_primary_comparison_metric_snapshot(comparison)
     return comparison
 
 

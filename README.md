@@ -22,6 +22,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - vocabulary-calibrated uniform-random baselines so each denoising aggregate can also be read as bits saved vs random guessing / denoising skill
   - timestep-uniform denoising CE / pseudo-perplexity
   - mask-ratio-reweighted sampled denoising CE / pseudo-perplexity for schedule-corrected sampled evaluation
+  - Horvitz-Thompson schedule-reweighted denoising CE / pseudo-perplexity normalized by exact eligible-token count
   - fixed-grid-uniform denoising CE / pseudo-perplexity over cached diagnostic timesteps
   - equal-weight-over-timestep macro denoising CE / pseudo-perplexity on the cached diagnostic grid
   - normalized timestep-fraction AUC denoising CE / pseudo-perplexity over the cached diagnostic grid
@@ -37,6 +38,7 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
   - evaluation quality summaries covering schedule-reweighted ESS reliability, timestep-grid coverage, and timestep-remapping status
   - comparison decision summaries that condense winner-confidence over the main pseudo-perplexity / calibration / accuracy views
   - explicit primary-metric recommendations for both single-model evals and cosine-vs-linear comparisons, including conservative fallback to timestep-AUC when schedule comparisons require normalized timestep remapping
+  - exported primary-metric snapshots for both single-model evals and cosine-vs-linear comparisons, bundling the chosen metric, CI, calibration view, and winner-confidence into a notebook/HF-friendly block
   - exported per-view calibration summaries, including confidence-interval bounds for `bits_saved_vs_uniform` and `denoising_skill`
   - per-timestep delta reporting for linear-vs-cosine comparisons
 - `dm_labs/hf_utils.py`
@@ -75,6 +77,7 @@ Current protocol improvements in the repo:
 - also report a **timestep-uniform denoising CE / pseudo-perplexity** that averages per-example masked-token CE over uniformly sampled timesteps
 - attach **bootstrap confidence intervals** for the timestep-uniform sampled view, so the schedule-agnostic sampled aggregate carries uncertainty too
 - also report a **schedule-reweighted sampled denoising CE / pseudo-perplexity** that applies inverse expected mask-ratio weights, so sampled-batch evaluation better approximates a uniform-over-mask-eligible-token-and-timestep denoising objective
+- also report a **Horvitz-Thompson schedule-reweighted denoising CE / pseudo-perplexity** normalized by the exact eligible-token count, so the sampled inverse-mask-ratio estimator is paired with a population-normalized schedule-corrected view
 - also report a **grid-uniform denoising CE / pseudo-perplexity** that averages over a fixed cached timestep grid shared across schedule comparisons
 - also report a **timestep-macro denoising CE / pseudo-perplexity** that gives equal top-level weight to each diagnostic timestep on the shared grid
 - also report a **timestep-AUC denoising CE / pseudo-perplexity** that integrates over normalized timestep fraction, so irregular diagnostic grids do not over-weight densely sampled regions

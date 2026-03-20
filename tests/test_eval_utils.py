@@ -71,6 +71,10 @@ class EvalPlanRemapTests(unittest.TestCase):
         self.assertIn("quality_summary", result)
         self.assertIn("schedule_reweighted_reliability", result["quality_summary"])
         self.assertEqual(result["quality_summary"]["recommended_primary_view"]["metric_key"], "schedule_reweighted_pseudo_perplexity")
+        self.assertIn("primary_metric_snapshot", result)
+        self.assertEqual(result["primary_metric_snapshot"]["metric_key"], "schedule_reweighted_pseudo_perplexity")
+        self.assertEqual(result["primary_metric_snapshot"]["view"], "schedule_reweighted_sampled")
+        self.assertAlmostEqual(result["primary_metric_snapshot"]["bits_saved_vs_uniform"], 0.0, places=6)
 
     def test_timestep_auc_matches_constant_metric_surface(self):
         plan = {
@@ -246,10 +250,14 @@ class ScheduleComparisonRemapTests(unittest.TestCase):
         self.assertIn("timestep_auc_pseudo_perplexity", comparison["winner"])
         self.assertIn("timestep_auc_bits_saved_vs_uniform", comparison["winner"])
         self.assertIn("schedule_reweighted_pseudo_perplexity", comparison["delta"])
+        self.assertIn("schedule_reweighted_ht_pseudo_perplexity", comparison["delta"])
         self.assertIn("schedule_reweighted_masked_token_accuracy", comparison["winner"])
+        self.assertIn("schedule_reweighted_ht_masked_token_accuracy", comparison["winner"])
         self.assertIn("schedule_reweighted_masked_token_accuracy", delta_ci := comparison["delta_confidence_intervals"]["delta_linear_minus_cosine"])
+        self.assertIn("schedule_reweighted_ht_masked_token_accuracy", delta_ci)
         self.assertIn("calibration", comparison)
         self.assertIn("sampled", comparison["calibration"]["cosine_schedule"])
+        self.assertIn("schedule_reweighted_ht", comparison["calibration"]["cosine_schedule"])
         self.assertIn("timestep_auc", comparison["calibration"]["linear_schedule_baseline"])
         self.assertIn("timestep_auc_pseudo_perplexity", delta_ci)
         self.assertIn("timestep_auc_masked_token_accuracy", delta_ci)
@@ -265,6 +273,10 @@ class ScheduleComparisonRemapTests(unittest.TestCase):
         self.assertIn("recommended_primary_metric", comparison["decision_summary"])
         self.assertEqual(comparison["decision_summary"]["recommended_primary_metric"]["metric"], "timestep_auc_pseudo_perplexity")
         self.assertIn("common normalized timestep grid", comparison["decision_summary"]["recommended_primary_metric"]["rationale"])
+        self.assertIn("primary_metric_snapshot", comparison)
+        self.assertEqual(comparison["primary_metric_snapshot"]["metric"], "timestep_auc_pseudo_perplexity")
+        self.assertEqual(comparison["primary_metric_snapshot"]["view"], "fixed_grid_timestep_auc")
+        self.assertTrue(comparison["primary_metric_snapshot"]["normalized_timestep_remapping"])
 
 
 if __name__ == "__main__":
