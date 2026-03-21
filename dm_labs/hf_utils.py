@@ -1,3 +1,4 @@
+import csv
 import json
 import math
 import os
@@ -653,6 +654,65 @@ def build_comparison_protocol_rows(comparison_summary: Optional[dict] = None) ->
     return rows
 
 
+def build_timestep_delta_rows(comparison_summary: Optional[dict] = None) -> list:
+    if not comparison_summary:
+        return []
+    rows = []
+    for row in comparison_summary.get("timestep_deltas") or []:
+        rows.append(
+            {
+                "source_plan_timestep": row.get("source_plan_timestep"),
+                "timestep_fraction": row.get("timestep_fraction"),
+                "cosine_timestep": row.get("cosine_timestep"),
+                "linear_timestep": row.get("linear_timestep"),
+                "avg_cross_entropy_delta_linear_minus_cosine": row.get("avg_cross_entropy"),
+                "pseudo_perplexity_delta_linear_minus_cosine": row.get("pseudo_perplexity"),
+                "bits_per_masked_token_delta_linear_minus_cosine": row.get("bits_per_masked_token"),
+                "masked_token_accuracy_delta_linear_minus_cosine": row.get("masked_token_accuracy"),
+                "cosine_mean_mask_fraction": row.get("cosine_mean_mask_fraction"),
+                "linear_mean_mask_fraction": row.get("linear_mean_mask_fraction"),
+                "mask_fraction_delta_linear_minus_cosine": row.get("mask_fraction_delta_linear_minus_cosine"),
+            }
+        )
+    return rows
+
+
+def _write_rows_csv(path: Path, rows: list) -> Optional[str]:
+    if not rows:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = []
+    seen = set()
+    for row in rows:
+        for key in row.keys():
+            if key not in seen:
+                seen.add(key)
+                fieldnames.append(key)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    return str(path)
+
+
+def write_notebook_table_exports(
+    local_artifact_dir: str,
+    *,
+    eval_summary: Optional[dict] = None,
+    comparison_summary: Optional[dict] = None,
+) -> dict:
+    local_artifact_dir = Path(local_artifact_dir)
+    local_artifact_dir.mkdir(parents=True, exist_ok=True)
+    return {
+        "eval_view_rows_csv": _write_rows_csv(local_artifact_dir / "eval_view_rows.csv", build_eval_view_rows(eval_summary)),
+        "eval_protocol_rows_csv": _write_rows_csv(local_artifact_dir / "eval_protocol_rows.csv", build_eval_protocol_rows(eval_summary)),
+        "comparison_rows_csv": _write_rows_csv(local_artifact_dir / "schedule_comparison_rows.csv", build_schedule_comparison_rows(comparison_summary)),
+        "comparison_protocol_rows_csv": _write_rows_csv(local_artifact_dir / "schedule_comparison_protocol_rows.csv", build_comparison_protocol_rows(comparison_summary)),
+        "timestep_delta_rows_csv": _write_rows_csv(local_artifact_dir / "schedule_timestep_deltas.csv", build_timestep_delta_rows(comparison_summary)),
+    }
+
+
 def write_eval_summary(local_artifact_dir: str, eval_summary: Optional[dict] = None) -> Optional[str]:
     if not eval_summary:
         return None
@@ -964,6 +1024,11 @@ def render_hf_preflight_report(validation: Optional[dict] = None) -> str:
         f"- local_artifact_dir: {_format_report_scalar(validation.get('local_artifact_dir'))}",
         f"- ready_for_upload: {_format_report_scalar(validation.get('ready_for_upload'))}",
         f"- eval_report_exists: {_format_report_scalar(checks.get('eval_report_exists'))}",
+        f"- eval_view_rows_csv_exists: {_format_report_scalar(checks.get('eval_view_rows_csv_exists'))}",
+        f"- eval_protocol_rows_csv_exists: {_format_report_scalar(checks.get('eval_protocol_rows_csv_exists'))}",
+        f"- comparison_rows_csv_exists: {_format_report_scalar(checks.get('comparison_rows_csv_exists'))}",
+        f"- comparison_protocol_rows_csv_exists: {_format_report_scalar(checks.get('comparison_protocol_rows_csv_exists'))}",
+        f"- timestep_delta_rows_csv_exists: {_format_report_scalar(checks.get('timestep_delta_rows_csv_exists'))}",
         f"- preflight_report_exists: {_format_report_scalar(checks.get('preflight_report_exists'))}",
         f"- model_exists: {_format_report_scalar(checks.get('model_exists'))}",
         f"- config_exists: {_format_report_scalar(checks.get('config_exists'))}",
@@ -1018,6 +1083,11 @@ def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = 
     comparison_path = local_artifact_dir / "schedule_comparison.json"
     eval_plan_path = local_artifact_dir / "eval_plan.pt"
     eval_report_path = local_artifact_dir / "eval_summary_report.txt"
+    eval_view_rows_csv_path = local_artifact_dir / "eval_view_rows.csv"
+    eval_protocol_rows_csv_path = local_artifact_dir / "eval_protocol_rows.csv"
+    comparison_rows_csv_path = local_artifact_dir / "schedule_comparison_rows.csv"
+    comparison_protocol_rows_csv_path = local_artifact_dir / "schedule_comparison_protocol_rows.csv"
+    timestep_delta_rows_csv_path = local_artifact_dir / "schedule_timestep_deltas.csv"
     preflight_report_path = local_artifact_dir / "hf_preflight_report.txt"
 
     manifest = {}
@@ -1033,6 +1103,11 @@ def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = 
         "schedule_comparison_exists": comparison_path.exists(),
         "eval_plan_exists": eval_plan_path.exists(),
         "eval_report_exists": eval_report_path.exists(),
+        "eval_view_rows_csv_exists": eval_view_rows_csv_path.exists(),
+        "eval_protocol_rows_csv_exists": eval_protocol_rows_csv_path.exists(),
+        "comparison_rows_csv_exists": comparison_rows_csv_path.exists(),
+        "comparison_protocol_rows_csv_exists": comparison_protocol_rows_csv_path.exists(),
+        "timestep_delta_rows_csv_exists": timestep_delta_rows_csv_path.exists(),
         "preflight_report_exists": preflight_report_path.exists(),
         "manifest_repo_id_matches": (repo_id is None) or (manifest.get("repo_id") == repo_id),
         **artifact_inspection.get("checks", {}),
@@ -1069,6 +1144,11 @@ def validate_hf_export_bundle(local_artifact_dir: str, repo_id: Optional[str] = 
         "comparison_summary_path": str(comparison_path) if comparison_path.exists() else None,
         "eval_plan_path": str(eval_plan_path) if eval_plan_path.exists() else None,
         "eval_report_path": str(eval_report_path) if eval_report_path.exists() else None,
+        "eval_view_rows_csv_path": str(eval_view_rows_csv_path) if eval_view_rows_csv_path.exists() else None,
+        "eval_protocol_rows_csv_path": str(eval_protocol_rows_csv_path) if eval_protocol_rows_csv_path.exists() else None,
+        "comparison_rows_csv_path": str(comparison_rows_csv_path) if comparison_rows_csv_path.exists() else None,
+        "comparison_protocol_rows_csv_path": str(comparison_protocol_rows_csv_path) if comparison_protocol_rows_csv_path.exists() else None,
+        "timestep_delta_rows_csv_path": str(timestep_delta_rows_csv_path) if timestep_delta_rows_csv_path.exists() else None,
         "preflight_report_path": str(preflight_report_path) if preflight_report_path.exists() else None,
         "artifact_inspection": artifact_inspection,
     }
@@ -1094,6 +1174,11 @@ def write_hf_export_bundle(
         eval_summary=eval_summary,
         comparison_summary=comparison_summary,
     )
+    table_exports = write_notebook_table_exports(
+        local_artifact_dir,
+        eval_summary=eval_summary,
+        comparison_summary=comparison_summary,
+    )
     readme_path = ensure_hf_model_card(
         local_artifact_dir,
         repo_id,
@@ -1109,11 +1194,17 @@ def write_hf_export_bundle(
         "comparison_summary_path": comparison_path,
         "eval_plan_path": eval_plan_path,
         "eval_report_path": eval_report_path,
+        "table_exports": table_exports,
         "preflight_report_path": None,
         "has_eval_summary": eval_summary is not None,
         "has_comparison_summary": comparison_summary is not None,
         "has_eval_plan": eval_plan is not None,
         "has_eval_report": eval_report_path is not None,
+        "has_eval_view_rows_csv": table_exports.get("eval_view_rows_csv") is not None,
+        "has_eval_protocol_rows_csv": table_exports.get("eval_protocol_rows_csv") is not None,
+        "has_comparison_rows_csv": table_exports.get("comparison_rows_csv") is not None,
+        "has_comparison_protocol_rows_csv": table_exports.get("comparison_protocol_rows_csv") is not None,
+        "has_timestep_delta_rows_csv": table_exports.get("timestep_delta_rows_csv") is not None,
         "eval_snapshot": summarize_eval_for_hf(eval_summary),
         "comparison_snapshot": summarize_comparison_for_hf(comparison_summary),
     }

@@ -44,11 +44,12 @@ Diffusion Language Model experiments, notebooks, and evaluation work.
 - `dm_labs/hf_utils.py`
   - reusable Hugging Face model-card + upload helpers
   - persists `eval_summary.json` and `schedule_comparison.json` alongside uploaded artifacts
+  - emits notebook-friendly CSV tables for evaluation views/protocols, comparison views/protocols, and per-timestep cosine-vs-linear deltas
   - surfaces timestep-uniform, schedule-reweighted, grid-uniform, timestep-macro, and timestep-AUC evaluation views in exported model cards
   - comparison tables now include per-view absolute cosine/linear values plus delta/winner metadata for pseudo-perplexity, bits-per-masked-token, calibration, and accuracy
   - paired bootstrap confidence intervals now also cover calibration deltas (`bits_saved_vs_uniform`, `denoising_skill`) in linear-vs-cosine comparisons, not just CE/PPX/accuracy
   - paired comparison exports now convert bootstrap deltas into winner-confidence summaries (`winner_probability`, `ci_excludes_zero`, `practically_tied`) so schedule claims are explicitly uncertainty-aware
-  - Hugging Face export bundling now emits validation metadata, making notebook-to-HF deployment checks easier before upload
+  - Hugging Face export bundling now emits validation metadata plus a plain-text preflight report, making notebook-to-HF deployment checks easier before upload
   - notebook-friendly plain-text reporting helpers now summarize the recommended single-model diffusion metric, the primary linear-vs-cosine winner, and HF preflight readiness without requiring manual JSON inspection
 
 ## Project Focus
